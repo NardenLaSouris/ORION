@@ -5,8 +5,9 @@ Pour Wallpaper Engine (fond d'écran « Web », adresse http://<mini-PC>:8767/) 
 Réservée aux adresses de [wallpaper] allowed_ips (elle affiche l'agenda et les rappels) ; bibliothèque standard.
 
 Interactions (POST) :
-- ``/action`` : commandes rapides, liste fermée d'outils sans risque (lumières, lecture Spotify), exécutées par le
-  Core des outils (permissions, journal) au nom du propriétaire ; rien d'autre n'est accepté ;
+- ``/action`` : commandes rapides, liste fermée d'outils sans risque (lumières, lecture Spotify, suppression d'un
+  rappel désigné par son numéro), exécutées par le Core des outils (permissions, journal) au nom du propriétaire ;
+  rien d'autre n'est accepté ;
 - ``/say`` : demande écrite à ORION, traitée par sa boucle comme vos messages Linphone (jarvis.wallpaper.inbox).
 Chaque POST exige le jeton de la page (``X-Orion-Token``, lu par /config, illisible depuis un autre site) et une
 origine identique à la page : un site ouvert sur le PC ne peut pas agir à votre place.
@@ -40,7 +41,10 @@ FILES = {
 }
 # Commandes rapides permises : réversibles, sans confirmation, sans effet hors de la maison.
 ACTIONS = {"light_on", "light_off", "light_toggle", "set_brightness", "spotify_play", "spotify_pause",
-           "spotify_next", "spotify_previous"}
+           "spotify_next", "spotify_previous", "cancel_reminder"}
+# Paramètres imposés : un rappel ne se supprime d'ici que par son numéro (jamais par des mots, qui pourraient en
+# désigner un autre que celui affiché).
+ONLY_PARAMETERS = {"cancel_reminder": {"reminder_id"}}
 MAX_BODY = 4096
 PER_MINUTE = 30  # actions et demandes par minute au plus (clics en rafale, page qui s'emballe)
 
@@ -93,6 +97,8 @@ class WallpaperServer:
         if self._tools is None or tool not in ACTIONS or not isinstance(parameters, dict) \
                 or not self._tools.registry.exists(tool):
             return 403, {"error": "action non permise depuis le fond d'écran"}
+        if tool in ONLY_PARAMETERS and set(parameters) != ONLY_PARAMETERS[tool]:
+            return 400, {"error": "paramètres non permis depuis le fond d'écran"}
         if self._tools.registry.get(tool).requires_confirmation:
             # Rendue « à confirmer » par la configuration : jamais depuis cette page (la question remplacerait celle
             # d'une conversation en cours).

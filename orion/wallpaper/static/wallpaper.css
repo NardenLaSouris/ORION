@@ -222,6 +222,10 @@ button:hover { border-color: var(--c); color: var(--c); box-shadow: 0 0 10px var
 #detail h2 { font-size: 16px; margin-bottom: 16px; }
 #detail-body { font-size: 15px; }
 #detail-body .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+#detail-body li .x { flex: 1; min-width: 0; }
+#detail-body button.del { min-width: 30px; height: 26px; padding: 0 8px; border-radius: 3px; font-size: 13px; }
+#detail-body button.del.sure { border-color: #ff6b5b; color: #ff6b5b; box-shadow: 0 0 10px rgba(255, 107, 91, 0.4); }
+#detail-body button.del.all { margin-top: 14px; }
 #detail-body .cell { border: 1px solid var(--faint); padding: 10px 12px; }
 #detail-body .cell b { display: block; font-family: "Michroma"; font-size: 22px; color: var(--text); margin: 4px 0; }
 #detail-body .cell small { color: var(--muted); }

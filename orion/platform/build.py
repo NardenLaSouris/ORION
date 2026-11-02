@@ -137,6 +137,20 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
         registry.register(EvolveEngine(store, workspace, settings=EvolveSettings(e.level, e.scan_minutes,
                                                                                  tuple(e.journal_units), e.remote),
                                        llm=structured, alerts=alerts, scheduler=scheduler, history=history))
+    if "purchase" in wanted:
+        from orion.purchase import PurchaseEngine, PurchaseSettings, SandboxMerchant, SandboxPayment
+        from orion.purchase.tools import purchase_tools
+
+        p = cfg.purchase
+        if not p.sandbox:
+            raise ValueError("[purchase] sandbox = false : aucun prestataire de paiement réel n'existe dans cette "
+                             "version")
+        purchase = PurchaseEngine(store, SandboxPayment(), SandboxMerchant(), alerts=alerts, events=events,
+                                  history=history, settings=PurchaseSettings(p.level, p.sandbox, p.allow_level3,
+                                                                             p.per_purchase_max, p.period_max,
+                                                                             p.period_days))
+        registry.register(purchase)
+        tools += purchase_tools(purchase)
     modules = V3Modules(store, scheduler, alerts, registry, tools)
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)
     return modules

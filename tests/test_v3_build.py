@@ -114,3 +114,18 @@ def test_invalid_news_feed_is_refused_by_name(tmp_path):
     cfg = config(tmp_path, news={"enabled": True, "feeds": {"cassé": {"url": "https://x.test"}}})
     with pytest.raises(ValueError, match="feeds.cassé"):
         build_v3(cfg)
+
+
+def test_purchase_needs_watch_and_never_a_real_payment(tmp_path):
+    import pytest
+
+    alone = build_v3(config(tmp_path, purchase={"enabled": True}), presence=Presence(None),
+                     notifications=Notifications())
+    try:
+        alone.connect(None)
+        assert {s["name"]: s["state"] for s in alone.registry.status()} == {"purchase": "non démarré"}
+        assert "stop_purchases" in {t.name for t in alone.tools}
+    finally:
+        alone.stop()
+    with pytest.raises(ValueError, match="sandbox"):
+        build_v3(config(tmp_path, purchase={"enabled": True, "sandbox": False}))

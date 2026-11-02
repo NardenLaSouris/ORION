@@ -247,7 +247,9 @@ MEASURES = (("stt", "stt"), ("tool_plan", "choix"), ("tool", "outil"), ("llm_fir
 def measure_line(latency: dict, speech_ended_at: float, stt_source: str = "") -> str:
     """« chemin=llm route=tool:tool.action stt=0.82 source=gpu choix=2.31 ... total=3.95 » : chemin « llm » si le
     modèle a choisi l'outil ou rédigé la réponse, « deterministe » sinon (formule, commande rapide, contexte)."""
-    used_llm = "tool_plan" in latency or "llm_total" in latency
+    # « planner » : le planificateur LLM a vraiment été appelé ; un choix d'outil par commande rapide (« tool:quick »,
+    # 0,001 s) mesure aussi « tool_plan » sans passer par le modèle (journal du 2 novembre 2026).
+    used_llm = bool(latency.get("planner")) or "llm_total" in latency
     parts = [f"chemin={'llm' if used_llm else 'deterministe'}", f"route={latency.get('route', 'llm')}"]
     for key, name in MEASURES:
         if key in latency:
@@ -902,7 +904,7 @@ class Agent:
         started = time.perf_counter()
         previous, report = self._previous_request, {}
         data = plan(self._llm, text, self._tools.registry, previous=previous, report=report)
-        latency["tool_plan"] = time.perf_counter() - started
+        latency["tool_plan"], latency["planner"] = time.perf_counter() - started, True
         if data is None and report.get("proposed") and previous and not named(report["proposed"], text,
                                                                                self._tools.registry):
             # Action proposée seulement d'après la demande précédente (« c'est joli » après « passe en cyan ») :
@@ -967,6 +969,7 @@ class Agent:
                 return self._say_phrase(history, text, "degraded_unknown", latency)
             if data is None:
                 data = plan(self._llm, text, self._tools.registry)
+                latency["planner"] = True
                 if data is None and self._degraded():  # le worker vient de tomber pendant le choix d'outil
                     data = self._quick(text, latency)
             latency["tool_plan"] = time.perf_counter() - started
@@ -1026,6 +1029,7 @@ class Agent:
         data = self._quick(schedule.command, latency) if self._fast_path or self._degraded() else None
         if data is None and not self._degraded():
             data = plan(self._llm, schedule.command, self._tools.registry)
+            latency["planner"] = True
         latency["tool_plan"] = time.perf_counter() - started
         if data is None:
             return self._say_text(history, text, "Je n'ai pas compris quelle action programmer.", latency)

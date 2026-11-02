@@ -106,8 +106,27 @@ def test_measure_line_separates_deterministic_and_llm_paths_without_any_text():
     quick = measure_line({"route": "tool:quick", "stt": 0.82, "tool": 0.01, "tts_first": 0.2, "début lecture": 12.5},
                          10.0, "gpu")
     assert quick == "chemin=deterministe route=tool:quick stt=0.820 source=gpu outil=0.010 tts_premier=0.200 total=2.500"
-    llm = measure_line({"route": "tool:tool.action", "stt": 0.9, "tool_plan": 2.31, "tool": 0.02}, 10.0)
+    llm = measure_line({"route": "tool:tool.action", "stt": 0.9, "tool_plan": 2.31, "planner": True, "tool": 0.02},
+                       10.0)
     assert llm.startswith("chemin=llm route=tool:tool.action stt=0.900 choix=2.310") and "total" not in llm
+    # Commande rapide : « choix » mesuré (0,001 s) sans appel au modèle (journal du 2 novembre 2026).
+    fast = measure_line({"route": "tool:quick", "stt": 0.68, "tool_plan": 0.001, "tool": 0.004}, 10.0, "gpu")
+    assert fast.startswith("chemin=deterministe route=tool:quick")
+
+
+def test_measured_path_matches_what_really_happened():
+    import sys
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_tools import PlannerLLM, make_core, run_agent
+
+    _, events = run_agent(["Mets le volume à 20"], PlannerLLM(), make_core(), fast_path=True)
+    quick = [t for k, t in events if k == "mesure"]
+    assert quick and quick[0].startswith("chemin=deterministe route=tool:quick")
+    _, events = run_agent(["Ouvre Discord"], PlannerLLM({"type": "tool_call", "tool": "open_application",
+                                                        "parameters": {"application": "discord"}}), make_core())
+    planned = [t for k, t in events if k == "mesure"]
+    assert planned and planned[0].startswith("chemin=llm")
 
 
 def test_latency_report_computes_medians_and_p90_per_path():

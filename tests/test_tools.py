@@ -712,13 +712,17 @@ SLEEP = "<veille>"
 
 
 def run_agent(texts, llm, core=None, tools=True, corrector=None, confidence=None, min_confidence=None,
-              repeat_confidence=None, **agent_options):
+              repeat_confidence=None, hotwords_log=None, **agent_options):
     class Stt:
         def __init__(self):
             self.replies = iter([t for t in texts if t != SLEEP])
             self.last_confidence = confidence
+            if hotwords_log is not None:  # mots attendus vus à chaque transcription
+                self.hotwords = "base"
 
         def transcribe(self, audio, rate):
+            if hotwords_log is not None:
+                hotwords_log.append(self.hotwords)
             return next(self.replies)
 
     class Tts:

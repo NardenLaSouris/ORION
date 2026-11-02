@@ -125,6 +125,18 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
                                                     w.requests_per_source_per_hour, w.failure_limit, w.opportunity))
         registry.register(engine)
         tools += watch_tools(engine)
+    if "evolve" in wanted:
+        from pathlib import Path
+
+        import orion
+        from orion.evolve import EvolveEngine, EvolveSettings, Workspace
+
+        e = cfg.evolve
+        code_root = Path(orion.__file__).resolve().parents[1]
+        workspace = Workspace(Path(e.workspace), e.repository or str(code_root), [code_root])
+        registry.register(EvolveEngine(store, workspace, settings=EvolveSettings(e.level, e.scan_minutes,
+                                                                                 tuple(e.journal_units), e.remote),
+                                       llm=structured, alerts=alerts, scheduler=scheduler, history=history))
     modules = V3Modules(store, scheduler, alerts, registry, tools)
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)
     return modules

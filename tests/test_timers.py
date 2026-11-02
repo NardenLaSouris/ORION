@@ -304,9 +304,9 @@ def call(tool, **parameters):
 
 def test_all_timer_tools_are_safe_and_never_ask(manager):
     tools = timer_tools(manager)
-    assert {t.name: t.risk for t in tools} == {name: Risk.SAFE for name in (
+    assert {t.name: t.risk for t in tools} == {**{name: Risk.SAFE for name in (
         "create_timer", "cancel_timer", "list_timers", "create_reminder", "cancel_reminder", "list_reminders",
-        "postpone_reminder")}
+        "postpone_reminder")}, "cancel_all_reminders": Risk.CONFIRMATION_REQUIRED}  # tout supprimer : on demande
     core = make_core(manager)
     assert core.submit(call("create_timer", duration="10 minutes")).status == DONE
     assert core.submit(call("create_reminder", delay="20 minutes", message="sortir le linge")).status == DONE
@@ -628,3 +628,40 @@ def test_postpone_the_reminder_that_just_rang(manager):
     tools["postpone_reminder"].execute({"delay": 600})  # reporté de nouveau : toujours un seul rappel, déplacé
     assert len(manager.reminders()) == 1
     assert abs((manager.reminders()[0].expires_at - manager.now()).total_seconds() - 2400) < 5
+
+
+
+def test_all_reminders_or_those_matching_words_are_deleted_after_confirmation(manager):
+    for delay, message in ((600, "sortir le linge"), (1200, "appeler Revolut pour la carte"),
+                           (1800, "répondre au mail de Revolut")):
+        manager.create_reminder(delay, message)
+    tool = {t.name: t for t in timer_tools(manager)}["cancel_all_reminders"]
+    assert tool.question({"message": "Revolut"}).startswith("Voulez-vous vraiment supprimer les 2 rappels")
+    core = make_core(manager)
+    asked = core.submit(call("cancel_all_reminders", message="Revolut"))
+    assert asked.status == CONFIRM and len(manager.reminders()) == 3  # rien sans « oui »
+    assert tool.run(message="Revolut")["count"] == 2
+    assert [r.message for r in manager.reminders()] == ["sortir le linge"]
+    assert tool.say(tool.run()) == "C'est fait, monsieur : 1 rappel supprimé."
+    assert manager.reminders() == []
+
+
+def test_deleting_all_reminders_when_there_are_none_says_so(manager):
+    from orion.tools.base import ToolError
+
+    tool = {t.name: t for t in timer_tools(manager)}["cancel_all_reminders"]
+    with pytest.raises(ToolError, match="Aucun rappel n'est prévu"):
+        tool.run()
+
+
+def test_dashboard_shows_the_date_of_reminders_on_another_day(bus):
+    from datetime import datetime
+
+    from orion.api.status import CoreStatus
+
+    now = datetime(2026, 11, 2, 14, 0)
+    manager = TimerManager(bus, clock=lambda: now)
+    manager.create_reminder_at(datetime(2026, 11, 2, 18, 0), "appeler le garage", "a")
+    manager.create_reminder_at(datetime(2026, 12, 5, 18, 0), "répondre à Revolut", "b")
+    schedule = CoreStatus(timers=manager)._schedule()  # noqa: SLF001
+    assert [r["at"] for r in schedule["reminders"]] == ["18:00", "05/12 18:00"]

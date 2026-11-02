@@ -102,7 +102,7 @@ def _build_engine(cfg: Config) -> TextToSpeech:
     if t.engine == "piper":
         from orion.tts.piper import PiperTTS
 
-        return PiperTTS(t.voice, t.length_scale, t.volume, t.speaker, t.pronunciations)
+        return PiperTTS(t.voice, t.length_scale, t.volume, t.speaker, t.pronunciations, t.soften_endings)
     if t.engine == "neutts":
         from orion.tts.neutts import NeuTTSEngine
 

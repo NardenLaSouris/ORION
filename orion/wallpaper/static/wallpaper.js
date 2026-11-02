@@ -297,6 +297,8 @@ async function poll() {
 // --- Interactions : détails, commandes rapides, conversation ------------------------------------------------
 const CAN = { token: "", actions: false };
 let toastTimer = null, idleTimer = null, detailView = null;
+// Suppression d'un rappel en deux clics (« ✕ » puis « Supprimer ? ») : rien ne part sur un clic égaré.
+let pendingDelete = null, pendingTimer = null;
 
 function toast(text, bad = false) {
   const el = $("toast");
@@ -320,8 +322,28 @@ async function act(tool, parameters = {}) {
   } catch (e) { toast("ORION ne répond pas.", true); }
   setTimeout(async () => {
     try { render(await (await fetch("stats", { cache: "no-store" })).json()); } catch (e) { /* prochain relevé */ }
-    if (detailView === VIEWS.house) refreshDetail(true);  // fiche des lumières : état réel après l'action
+    if (detailView === VIEWS.house || detailView === VIEWS.agenda) refreshDetail(true);  // état réel après l'action
   }, 1500);
+}
+
+function deleteButton(x) {
+  if (!CAN.actions || x.kind !== "rappel" || !x.id) return "";
+  const sure = pendingDelete === x.id;
+  return `<button class="del${sure ? " sure" : ""}" data-delete="${esc(x.id)}" title="Supprimer ce rappel">${sure ? "Supprimer ?" : "✕"}</button>`;
+}
+
+async function deleteAll() {
+  const ids = (val(latest, "schedule") || []).filter((x) => x.kind === "rappel" && x.id).map((x) => x.id);
+  let done = 0;
+  for (const id of ids) {
+    try { if ((await post("action", { tool: "cancel_reminder", parameters: { reminder_id: id } })).ok) done += 1; }
+    catch (e) { /* ORION injoignable : compté comme non supprimé */ }
+  }
+  toast(done === ids.length ? `${done} rappel${done > 1 ? "s" : ""} supprimé${done > 1 ? "s" : ""}.`
+    : `${done} rappel(s) supprimé(s) sur ${ids.length}.`, done !== ids.length);
+  setTimeout(async () => {
+    try { render(await (await fetch("stats", { cache: "no-store" })).json()); } catch (e) { /* prochain relevé */ }
+  }, 800);
 }
 
 function openDetail(view) {
@@ -356,7 +378,22 @@ const VIEWS = {
       "<h3>Cette semaine</h3><ul>" + (a.length ? a.map((e) => `<li><span class="t">${e.today ? "Aujourd'hui" : e.day} ${e.time}</span>` +
       `<span>${esc(e.title)}</span></li>`).join("") : '<li class="empty">Rien de prévu</li>') + "</ul>" +
       "<h3>Rappels et minuteurs</h3><ul>" + (r.length ? r.map((x) => `<li><span class="t">${x.at || ""} · ${soon(x.seconds)}</span>` +
-      `<span>${esc(x.label)}</span></li>`).join("") : '<li class="empty">Aucun</li>') + "</ul>"];
+      `<span class="x">${esc(x.label)}</span>${deleteButton(x)}</li>`).join("") : '<li class="empty">Aucun</li>') + "</ul>" +
+      (CAN.actions && r.filter((x) => x.id).length > 1 ? `<button class="del all${pendingDelete === "*" ? " sure" : ""}" data-delete="*">` +
+        `${pendingDelete === "*" ? "Tout supprimer ?" : "Supprimer tous les rappels"}</button>` : "")];
+  }, after() {
+    document.querySelectorAll("#detail [data-delete]").forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      const id = b.dataset.delete;
+      if (pendingDelete !== id) {  // premier clic : demande de confirmation sur le bouton même
+        pendingDelete = id;
+        clearTimeout(pendingTimer); pendingTimer = setTimeout(() => { pendingDelete = null; refreshDetail(true); }, 5000);
+        return refreshDetail(true);
+      }
+      pendingDelete = null; clearTimeout(pendingTimer);
+      if (id === "*") return deleteAll();
+      act("cancel_reminder", { reminder_id: id });
+    });
   } },
   core: { draw(s) {
     const c = val(s, "core");

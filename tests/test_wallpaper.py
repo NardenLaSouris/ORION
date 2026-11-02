@@ -107,10 +107,10 @@ def test_sources_only_read():
     now = datetime(2026, 10, 15, 20, 0)
     timers = SimpleNamespace(now=lambda: now,
                              timers=lambda: [SimpleNamespace(expires_at=now + timedelta(minutes=5))],
-                             reminders=lambda: [SimpleNamespace(message="Sortir le linge",
+                             reminders=lambda: [SimpleNamespace(id=3, message="Sortir le linge",
                                                                 expires_at=now + timedelta(minutes=2))])
     assert schedule_source(timers)() == [
-        {"kind": "rappel", "label": "Sortir le linge", "seconds": 120, "at": "20:02"},
+        {"kind": "rappel", "id": "3", "label": "Sortir le linge", "seconds": 120, "at": "20:02"},
         {"kind": "minuteur", "label": "Minuteur", "seconds": 300}]
     devices = {"pc": SimpleNamespace(name="PC fixe", url="http://pc:8765"),
                "mini": SimpleNamespace(name="mini-PC", url="")}
@@ -283,3 +283,16 @@ def test_a_request_never_taken_is_dropped_not_run_later():
     inbox = WallpaperInbox()
     assert inbox.ask("Éteins tout", timeout=0.05) is None  # ORION occupée : rien n'a été pris
     assert inbox.take() is None  # et rien ne s'exécutera plus tard
+
+
+def test_a_reminder_is_deleted_from_the_wallpaper_only_by_its_number(interactive):
+    url, wallpaper, core, _ = interactive
+    token = json.loads(get(url + "config")[2])["token"]
+    assert "cancel_reminder" in json.loads(get(url + "config")[2])["actions"]
+    assert post(url + "action", {"tool": "cancel_reminder", "parameters": {"reminder_id": "3"}}, token)[0] == 200
+    assert core.calls == [("cancel_reminder", {"reminder_id": "3"}, "owner", "user")]
+    # Par des mots, sans numéro, ou tout d'un coup : refusé (seul le rappel affiché, désigné par son numéro).
+    for parameters in ({"message": "Revolut"}, {}, {"reminder_id": "3", "message": "linge"}):
+        assert post(url + "action", {"tool": "cancel_reminder", "parameters": parameters}, token)[0] == 400
+    assert post(url + "action", {"tool": "cancel_all_reminders", "parameters": {}}, token)[0] == 403
+    assert len(core.calls) == 1

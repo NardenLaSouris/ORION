@@ -102,6 +102,8 @@ class Bridge:
             return c.update_routine(route[1], data)
         if method == "DELETE" and len(route) == 2 and route[0] == "routines":
             return c.delete_routine(route[1])
+        if route[:1] == ["modules"] and method in ("GET", "POST", "PUT", "DELETE"):
+            return c.module(method, route[1:], query, data)
         raise LookupError("/".join(route))
 
     def _handler(self):

@@ -401,7 +401,9 @@ def test_only_the_core_and_the_windows_agent_execute_tools():
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if re.search(r"\.execute\(", line) and "def execute" not in line:
                 found.append(f"{path.relative_to(ROOT).as_posix()}:{number}")
-    assert sorted(f.rsplit(":", 1)[0] for f in found) == ["orion/tools/core.py", "orion/winagent/server.py"]
+    # orion/platform/store.py : seul endroit où SQLite exécute une requête (base des modules V3), aucun outil.
+    assert sorted(set(f.rsplit(":", 1)[0] for f in found)) == ["orion/platform/store.py", "orion/tools/core.py",
+                                                               "orion/winagent/server.py"]
 
 
 def test_every_submission_goes_through_the_permission_check():

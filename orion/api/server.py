@@ -11,6 +11,7 @@ validation, permissions). Seuls les outils sans confirmation sont exécutables i
   POST /api/routines/<id>/run | enable | disable | duplicate
   POST /api/call                       {"reason": "..."} : appel d'essai vers l'appareil jumelé ([call] activé),
                                        avec les limites des appels (origine « admin », jamais automatique)
+  GET  /api/modules                    modules V3 (état) ; /api/modules/<nom>/… : routes du module (orion/platform)
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from orion.api.status import CoreStatus, history_item
 from orion.face.server import ExclusiveServer
@@ -53,6 +54,7 @@ class CoreApi:
         self.face_themes = face_themes
         self.presence = presence
         self.calls = None  # gestionnaire d'appels (orion/call), branché après sa création
+        self.modules = None  # registre des modules V3 (orion/platform/modules.py), s'il y en a d'activés
         self._httpd: ExclusiveServer | None = None
 
     @property
@@ -185,7 +187,7 @@ class CoreApi:
                     log.warning("API : requête refusée depuis %s", ip)
                     return self._error(403, "forbidden")
                 parts = urlsplit(self.path)
-                segments = [s for s in parts.path.split("/") if s]
+                segments = [unquote(s) for s in parts.path.split("/") if s]  # « réglages », espaces
                 if segments[:1] != ["api"]:
                     return self._error(404, "not_found")
                 route = segments[1:]
@@ -224,6 +226,10 @@ class CoreApi:
                     return api.presence_action(method, route[1:], data)
                 if method == "POST" and route == ["call"]:
                     return api.call_action(data)
+                if route[:1] == ["modules"]:
+                    if api.modules is None:
+                        return 404, {"status": "error", "error": "modules_disabled"}
+                    return api.modules.admin(method, route[1:], query, data)
                 if method == "GET" and route == ["face"]:
                     if api.face_themes is None:
                         return 404, {"status": "error", "error": "face_disabled"}

@@ -386,6 +386,70 @@ class AudioConfig:
     speech_to_noise_ratio: float = 3.0
 
 
+# --- ORION V3 (orion/platform, orion/watch, orion/news, orion/evolve, orion/purchase) ------------------------
+# Tout est désactivé par défaut : sans « enabled = true », aucun module V3 ne démarre et ORION se comporte comme V2.
+
+@dataclass(frozen=True)
+class ModulesConfig:
+    """Socle commun : base SQLite des modules et règles des alertes (présence, heures calmes, budget d'appels)."""
+    database: Path = Path("data/orion_v3.db")
+    quiet_start: str = "22:30"
+    quiet_end: str = "08:00"
+    max_calls_per_day: int = 3
+    min_call_interval_minutes: float = 15.0
+    dedup_hours: float = 12.0
+    critical_ignores_quiet: bool = False
+
+
+@dataclass(frozen=True)
+class WatchConfig:
+    enabled: bool = False
+    default_interval_minutes: float = 60.0
+    min_interval_minutes: float = 10.0
+    requests_per_source_per_hour: int = 20
+    failure_limit: int = 10
+    # Sources : nom -> {"type": "rss" | "offers_json", "url": "...", "reliability": "official" | "media" |
+    # "community", "kinds": ["event", "announcement"…]}. Aucune source n'est interrogée sans y figurer.
+    sources: dict = field(default_factory=dict)
+    opportunity: dict = field(default_factory=dict)  # poids du score d'opportunité (orion/watch/opportunity.py)
+
+
+@dataclass(frozen=True)
+class NewsConfig:
+    enabled: bool = False
+    bulletin_times: tuple = ("08:00", "20:00")
+    categories: tuple = ("geopolitique", "defense", "tech_ia", "france", "economie")
+    # Flux : nom -> {"url": "...", "category": "...", "reliability": "official" | "agency" | "media" | "blog"}.
+    feeds: dict = field(default_factory=dict)
+    collect_minutes: float = 30.0
+    thresholds: dict = field(default_factory=dict)  # bulletin, prioritaire, alerte, alerte prioritaire (sur 100)
+    max_calls_per_day: int = 3
+    min_call_interval_minutes: float = 15.0
+    use_llm: bool = True
+
+
+@dataclass(frozen=True)
+class EvolveConfig:
+    enabled: bool = False
+    level: int = 1  # 1 observateur, 2 développeur ; 3 (mainteneur) refusé dans cette version
+    repository: str = ""  # dépôt à cloner dans l'espace de travail ; vide : le dépôt d'ORION lui-même
+    workspace: Path = Path("data/evolve")
+    remote: str = ""  # vide : la Pull Request est préparée localement, rien n'est poussé
+    scan_minutes: float = 60.0
+    journal_units: tuple = ("orion",)
+
+
+@dataclass(frozen=True)
+class PurchaseConfig:
+    enabled: bool = False
+    level: int = 1  # 1 : ORION prépare et demande confirmation ; 2 et 3 : activation explicite (voir orion/purchase)
+    sandbox: bool = True  # seul le bac à sable existe : aucun prestataire de paiement réel n'est branché
+    allow_level3: bool = False
+    per_purchase_max: float = 0.0  # niveau 3 : plafond par achat (0 : niveau 3 impossible)
+    period_max: float = 0.0  # niveau 3 : plafond par période
+    period_days: int = 30
+
+
 @dataclass(frozen=True)
 class Config:
     assistant: AssistantConfig
@@ -412,6 +476,11 @@ class Config:
     presence: PresenceConfig = PresenceConfig()
     mail: MailConfig = MailConfig()
     call: CallConfig = CallConfig()
+    modules: ModulesConfig = ModulesConfig()
+    watch: WatchConfig = WatchConfig()
+    news: NewsConfig = NewsConfig()
+    evolve: EvolveConfig = EvolveConfig()
+    purchase: PurchaseConfig = PurchaseConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -537,6 +606,11 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "presence": PresenceConfig,
         "mail": MailConfig,
         "call": CallConfig,
+        "modules": ModulesConfig,
+        "watch": WatchConfig,
+        "news": NewsConfig,
+        "evolve": EvolveConfig,
+        "purchase": PurchaseConfig,
     }
     tables = {key: raw.pop(key, {}) for key in ("users", "terminals")}
     unknown = set(raw) - set(sections)

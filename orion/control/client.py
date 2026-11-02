@@ -87,3 +87,10 @@ class CoreClient:
 
     def get_history(self, kind: str = "all", limit: int = 300) -> list:
         return self._call("GET", "/history?" + urlencode({"kind": kind, "limit": limit}))
+
+    def module(self, method: str, parts: list[str], query: dict | None = None, body=None):
+        """Modules V3 : /api/modules/<nom>/… (WATCH, NEWS, EVOLVE, PURCHASE), relayé tel quel."""
+        path = "/modules" + "".join("/" + quote(p, safe="") for p in parts)
+        if query:
+            path += "?" + urlencode(query, doseq=True)
+        return self._call(method, path, body if method in ("POST", "PUT") else None)

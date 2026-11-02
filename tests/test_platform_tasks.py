@@ -448,7 +448,8 @@ def test_a_one_off_bulletin_you_schedule_is_a_persistent_task_that_runs_while_su
     foundation = Foundation(Store())
     n = news_world(foundation)
     foundation.tasks.register("news.bulletin", lambda run: {"bulletin": n.engine.bulletin(run.params.get("slot"),
-                                                                                          deliver=True)},
+                                                                                          deliver=True,
+                                                                                          origin=run.principal)},
                               Capability.NOTIFY)
     task = foundation.tasks.schedule_for_user("news.bulletin", {"slot": "18:00"}, by=VOICE)
     assert foundation.tasks.run_due() == [(task.id, DONE)]
@@ -464,14 +465,36 @@ def test_news_files_are_still_untouched():
             assert word not in text, (path.name, word)
 
 
-def test_an_alert_only_takes_the_running_principal_of_its_own_module():
+def test_an_alert_never_inherits_the_principal_of_the_task_that_triggered_it():
     from orion.platform.running import running_as
 
     with running_as("delegated:news:bulletins"):
-        assert Alert("news", "t", "m").principal == "delegated:news:bulletins"
-        assert Alert("watch", "t", "m").principal == "module:watch"
+        assert Alert("news", "t", "m").principal == "module:news"  # F3 : identité, jamais le contexte
         assert Alert("news", "t", "m", origin="delegated:watch:w1").principal == "delegated:watch:w1"
-    assert Alert("news", "t", "m").principal == "module:news"
+
+
+def test_a_spontaneous_news_alert_raised_during_a_scheduled_bulletin_stays_an_initiative():
+    """Le bulletin programmé déclenche un traitement qui émet une alerte spontanée : elle reste « module:news » et
+    est refusée pendant la suspension, le bulletin passe."""
+    from tests.test_news import GRAVE
+
+    foundation = Foundation(Store())
+    n = news_world(foundation)
+    publish_grave(n)
+    original = n.engine.bulletin
+
+    def bulletin_that_also_collects(*args, **kwargs):
+        n.engine.collect()  # traitement déclenché par le bulletin : alerte spontanée possible
+        return original(*args, **kwargs)
+
+    n.engine.bulletin = bulletin_that_also_collects
+    n.clock.t += 3600 + 60  # 8 h 01
+    n.scheduler.remove("news:collect")
+    assert n.scheduler.tick() == ["news:bulletins"]
+    history = {a["title"].split(" :")[0]: a["status"] for a in n.alerts.history(20, "news")}
+    assert history["Alerte"] == "bloquée" and any(k.startswith("Bulletin") for k in history)
+    assert [a["status"] for a in n.alerts.history(20, "news") if a["title"].startswith("Bulletin")] == ["envoyée"]
+    assert GRAVE[0]
 
 
 # --- Annonces vocales et veille -----------------------------------------------------------------------------

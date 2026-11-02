@@ -1,9 +1,8 @@
 """Au nom de qui s'exécute le code en cours (CORE FOUNDATION F2) : le planificateur et le service de tâches fixent le
-principal de la tâche le temps de son exécution ; une alerte émise pendant ce temps par le même module part sous ce
-principal (un bulletin NEWS que vous avez programmé reste une tâche programmée, une alerte spontanée de NEWS reste
-une initiative du module).
+principal de la tâche le temps de son exécution, pour le journal et le diagnostic.
 
-Le principal est fixé par la plateforme, d'après sa propre classification des tâches : un module ne le choisit pas.
+F3 : ce contexte ne sert **jamais** à classer une alerte ou une notification ; leur origine vient de l'identité et du
+type réel de ce qui les émet (``Alert.origin``), pas de la tâche qui les a déclenchées.
 """
 
 from __future__ import annotations
@@ -27,10 +26,3 @@ def running_as(principal: str) -> Iterator[None]:
 def current() -> str:
     return RUNNING_AS.get()
 
-
-def principal_for(source: str) -> str:
-    """Principal de la tâche en cours si elle appartient au module ``source`` (``delegated:news:…`` ou
-    ``module:news`` pour la source ``news``), sinon "" ."""
-    running = current()
-    parts = running.split(":")
-    return running if len(parts) >= 2 and parts[1] == source else ""

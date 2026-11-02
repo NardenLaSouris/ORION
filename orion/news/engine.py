@@ -330,7 +330,8 @@ class NewsEngine(BaseModule):
             delivery = self._alerts.deliver(Alert("news", f"{prefix} : {story.title[:90]}", message, level,
                                                   key=f"{story.id}:{prefix}:{story.score // 5}",
                                                   call_allowed=not refusal,
-                                                  details={"story": story.id, "score": story.score}))
+                                                  details={"story": story.id, "score": story.score},
+                                                  origin="module:news"))  # alerte spontanée : toujours initiative
             if CALL in delivery.channels:
                 self._calls.use()
         story.alerted_score, story.alerted_status = story.score, story.status
@@ -366,7 +367,10 @@ class NewsEngine(BaseModule):
         row = self._store.one("SELECT MAX(at) AS at FROM news_bulletins WHERE delivered != '\"aperçu\"'")
         return row["at"] if row and row["at"] else self._clock() - 86400
 
-    def bulletin(self, slot: str | None = None, deliver: bool = False) -> int:
+    def bulletin(self, slot: str | None = None, deliver: bool = False,
+                 origin: str = "delegated:news:bulletins") -> int:
+        """``origin`` : le bulletin est une tâche que vous avez programmée (heures réglées, ou bulletin ponctuel avec
+        son propre principal) ; jamais une initiative du module, et inversement pour les alertes spontanées."""
         now = self._clock()
         since = self._previous_bulletin_at()
         s = self.settings
@@ -395,7 +399,7 @@ class NewsEngine(BaseModule):
             if self._alerts is not None:
                 d = self._alerts.deliver(Alert("news", f"Bulletin de {slot}", short, Level.NORMAL,
                                                key=f"bulletin:{datetime.fromtimestamp(now):%Y-%m-%d}:{slot}",
-                                               call_allowed=False))
+                                               call_allowed=False, origin=origin))
                 delivered = list(d.channels)
             for story in stories[:MAX_BULLETIN_ITEMS]:
                 story.bulletin_facts = set(story.facts)

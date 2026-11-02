@@ -78,7 +78,7 @@ class NotificationsModule(BaseModule):
 # modules : (principal, capacité). Ce que vous avez programmé ou réglé part sous « delegated:… » et continue pendant
 # la suspension ; une initiative de module sous « module:… ».
 #   - news:bulletins : bulletins aux heures que vous avez réglées -> tâche programmée (NOTIFY) ;
-#   - news:collect : collecte des flux (lecture) ; les alertes spontanées qui en sortent restent « module:news » ;
+#   - news:collect : collecte des flux (lecture) ; ses alertes spontanées déclarent « module:news » ;
 #   - watch:<id> : surveillance que vous avez créée ;
 #   - evolve:scan : analyse des journaux, initiative d'EVOLVE (lecture).
 JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.value),
@@ -161,7 +161,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
         if foundation is not None:
             # Bulletin que vous programmez à une heure précise (« fais-moi un bulletin à 18 h ») : tâche persistante.
             foundation.tasks.register("news.bulletin", lambda run, engine=news: {"bulletin": engine.bulletin(
-                run.params.get("slot"), deliver=True)}, Capability.NOTIFY)
+                run.params.get("slot"), deliver=True, origin=run.principal)}, Capability.NOTIFY)
     if "watch" in wanted:
         from orion.watch import WatchEngine, WatchSettings
         from orion.watch.connectors import build_connectors

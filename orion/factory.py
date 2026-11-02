@@ -977,6 +977,12 @@ def build_agent(
     if cfg.call.enabled and cfg.tools.enabled:  # règles d'appel dites par l'utilisateur (le gestionnaire vient après)
         call_rules, rule_tools = build_call_rules(cfg, llm, presence, timers, mailbox, mail_actions)
         extra += rule_tools
+    from orion.platform.build import build_v3
+
+    # Modules V3 (WATCH, NEWS, EVOLVE, PURCHASE) : rien n'est créé si aucun n'est activé (comportement V2).
+    v3 = build_v3(cfg, events=events, llm=llm, presence=presence, notifications=notifications)
+    if v3 is not None and cfg.tools.enabled:
+        extra += v3.tools
     tools = build_tools(cfg, personality, events, timers, weather, devices,
                         light_tools_for(rooms, driver, cfg.lights.scenes, home), extra)
     speaker["core"] = tools
@@ -1070,6 +1076,10 @@ def build_agent(
         call_rules.connect(calls, events)  # démarre aussi le fil des échéances
     if calls is not None and api is not None:
         api.calls = calls  # appel d'essai par l'API d'administration (POST /api/call), jamais automatique
+    if v3 is not None:
+        v3.connect(calls)  # alertes par appel et message Linphone, puis démarrage des modules
+        if api is not None:
+            api.modules = v3.registry
     if calls is not None and cfg.audio.remote and hasattr(source, "on_status"):
         from orion.call.notices import PcOnlineNotice
 
@@ -1090,7 +1100,7 @@ def build_agent(
                  stream_audio=cfg.tts.stream_audio, merge_under=cfg.tts.merge_under, web=web,
                  tools=tools, corrector=corrector, notifications=voice, alarm=routines.alarm if routines else None,
                  services=tuple(s for s in (api, routines, timers, notifications, worker, presence, calls,
-                                                 call_rules if calls is not None else None)
+                                                 call_rules if calls is not None else None, v3)
                                 if s is not None),
                  fast_path=cfg.tools.fast_path, routines=routines, profiles=build_profiles(cfg),
                  wake_verifier=build_wake_verifier(cfg), wake_captures=build_wake_captures(cfg),

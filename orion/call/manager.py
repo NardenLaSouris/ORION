@@ -25,7 +25,7 @@ from orion.call.session import ACCEPTED, CONNECTED, ENDED, EXPIRED, FAILED, REFU
 
 log = logging.getLogger(__name__)
 
-CORE_ORIGINS = ("user", "routine", "admin")
+CORE_ORIGINS = ("user", "routine", "admin", "alert")  # alert : modules V3 (orion/platform)
 MAX_DIALS_PER_HOUR = 30  # appels du téléphone vers ORION : seulement contre une boucle (application qui s'emballe)
 MAX_PENDING_MESSAGES = 10
 MAX_REASON = 2400  # ce qu'ORION dit au décroché (une présentation Flex entière : jamais coupée en plein mot)  # messages en attente pendant une conversation ou un appel

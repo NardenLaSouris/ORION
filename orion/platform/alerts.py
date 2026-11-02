@@ -72,6 +72,7 @@ class Alert:
     key: str = ""
     call_allowed: bool = True  # le module peut l'interdire (bulletin, budget propre au module épuisé)
     private: bool = False  # texte privé : seul le titre est dit ou écrit
+    written_only: bool = False  # choix de l'utilisateur pour cette source : jamais de voix ni d'appel
     details: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -170,7 +171,10 @@ class AlertRouter:
         bypass = quiet and alert.level == Level.CRITICAL and self.settings.critical_ignores_quiet
         channels: list[str] = []
         skipped: dict[str, str] = {}
-        if presence == HOME:
+        if alert.written_only:
+            skipped[VOICE] = skipped[CALL] = "message écrit seulement (choix de l'utilisateur)"
+            self._send(WRITTEN, self._write, alert, channels, skipped)
+        elif presence == HOME:
             if quiet and not bypass:
                 skipped[VOICE] = "heures calmes : message écrit à la place"
                 self._send(WRITTEN, self._write, alert, channels, skipped)

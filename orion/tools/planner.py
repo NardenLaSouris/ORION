@@ -196,6 +196,11 @@ def planner_prompt(registry: ToolRegistry) -> str:
         rules.append("- Fichiers : jamais de chemin, un nom de fichier tel qu'il a été dit (le dossier est déduit de la "
                      "demande, jamais un paramètre) ; destination de copy_file et move_file : dossier dit (documents, "
                      "bureau, téléchargements). Supprimer un dossier, exécuter un fichier ou toucher au système -> none.")
+    if registry.exists("create_watch"):
+        rules.append("- « Surveille… », « préviens-moi quand » un prix baisse, un produit revient en stock, un événement "
+                     "de jeu ou une annonce officielle sort : create_watch (information extérieure), jamais "
+                     "create_call_rule ni create_reminder. Lister, mettre en pause, reprendre, supprimer une "
+                     "surveillance : list_watches, pause_watch, resume_watch, delete_watch.")
     if registry.exists("create_call_rule"):
         rules.append("- « Appelle-moi / préviens-moi / écris-moi quand… si… la veille… » : create_call_rule (une règle "
                      "d'appel, même si la phrase parle de rappels ou d'agenda), jamais create_reminder.")
@@ -383,6 +388,13 @@ DOMAIN_WORDS = {
                         "previens", "prevenir", "n oublie", "oublie pas", "souviens", "noter", "note"),
     # Règles d'appel : seulement quand l'utilisateur parle d'appel ou de règle.
     "create_call_rule": ("appelle moi", "appelez moi", "previens moi", "ecris moi", "telephone moi"),
+    # WATCH (V3) : une information extérieure à surveiller.
+    "create_watch": ("surveille", "surveiller", "surveillez", "surveillance", "previens moi", "prix", "disponible",
+                     "en stock", "bonne affaire", "annonce", "sortie", "pokemon"),
+    "list_watches": ("surveillance", "surveillances", "surveilles", "surveilles tu"),
+    "pause_watch": ("surveillance", "surveillances"),
+    "resume_watch": ("surveillance", "surveillances"),
+    "delete_watch": ("surveillance", "surveillances"),
     "list_call_rules": ("regle", "regles"),
     "describe_call_rule": ("regle", "regles"),
     "set_call_rule_enabled": ("regle", "regles"),

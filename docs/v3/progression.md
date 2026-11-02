@@ -47,9 +47,10 @@ Options proposées :
 ## Prochain chantier
 
 En attendant les décisions (déploiement, F4), travaux indépendants, sans déploiement :
-- revue de cohérence de la vue ORION Control de F3, sur une démonstration locale avec des données factices ;
-- préparation de l'inventaire Google Takeout (outil d'inventaire qui ne lit que les métadonnées, testé sur des
-  archives factices).
+- revue d'ORION Control de F3 : **faite**, sur une démonstration factice. Les tableaux ne débordent plus de la page (`a074167`) ;
+- inventaire Google Takeout : **prêt**. `python -m orion.imports.takeout <archives ou dossier>` lit seulement
+  l'index des archives (noms, tailles), jamais leur contenu, et produit un rapport Markdown. Il est testé sur des
+  archives factices.
 
 ## Google Takeout
 

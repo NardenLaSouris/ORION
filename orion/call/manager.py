@@ -86,6 +86,7 @@ class CallManager:
         self._notifier = notifier or LogNotifier()
         self._clock = clock
         self._on_event = on_event or (lambda kind, data: None)
+        self.permit = None  # moteur central des permissions (CORE FOUNDATION F1), branché par la factory
         self._limits = CallLimits(settings.limits)
         self._dials: deque[float] = deque()  # appels composés par le téléphone (limite anti-boucle à part)
         self._inbox: deque[str] = deque(maxlen=MAX_PENDING_MESSAGES)  # vos messages pas encore traités
@@ -103,6 +104,10 @@ class CallManager:
         with self._lock:
             if origin not in CORE_ORIGINS:
                 raise CallRefused(f"origine non autorisée ({origin})")
+            if origin == "routine" and self.permit is not None:  # règle d'appel, absence : tâche programmée
+                verdict = self.permit("delegated:call", "CALL", {}, action="call:routine")
+                if not verdict.allowed:
+                    raise CallRefused(f"permission : {verdict.reason}")
             if not self.settings.device:
                 raise CallRefused("aucun appareil jumelé")
             if self.current is not None and not self.current.final:

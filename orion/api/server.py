@@ -12,6 +12,9 @@ validation, permissions). Seuls les outils sans confirmation sont exécutables i
   POST /api/call                       {"reason": "..."} : appel d'essai vers l'appareil jumelé ([call] activé),
                                        avec les limites des appels (origine « admin », jamais automatique)
   GET  /api/modules                    modules V3 (état) ; /api/modules/<nom>/… : routes du module (orion/platform)
+  GET | POST /api/autonomy             interrupteur d'autonomie ([platform]) ; réactiver exige la phrase de confirmation
+  GET  /api/ledger | /api/ledger/verify  registre d'actions et vérification de son chaînage
+  GET  /api/grants  DELETE /api/grants/<id>  autorisations du moteur central (révocation)
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ class CoreApi:
         self.presence = presence
         self.calls = None  # gestionnaire d'appels (orion/call), branché après sa création
         self.modules = None  # registre des modules V3 (orion/platform/modules.py), s'il y en a d'activés
+        self.foundation = None  # CORE FOUNDATION (orion/platform/foundation.py), si [platform] est activé
         self._httpd: ExclusiveServer | None = None
 
     @property
@@ -206,13 +210,13 @@ class CoreApi:
                     except ValueError:
                         return self._error(400, "bad_request", "JSON invalide.")
                 try:
-                    status, payload = self._route(method, route, parse_qs(parts.query), data)
+                    status, payload = self._route(method, route, parse_qs(parts.query), data, ip)
                 except Exception:
                     log.exception("API : erreur sur %s %s", method, parts.path)
                     status, payload = 500, {"status": "error", "error": "internal_error"}
                 self._json(status, payload)
 
-            def _route(self, method: str, route: list[str], query: dict, data):
+            def _route(self, method: str, route: list[str], query: dict, data, ip: str = ""):
                 if method == "GET" and route == ["status"]:
                     return 200, api.status.snapshot()
                 if method == "GET" and route == ["devices"]:
@@ -226,6 +230,11 @@ class CoreApi:
                     return api.presence_action(method, route[1:], data)
                 if method == "POST" and route == ["call"]:
                     return api.call_action(data)
+                if route[:1] in (["autonomy"], ["ledger"], ["grants"]):
+                    if api.foundation is None:
+                        return 404, {"status": "error", "error": "platform_disabled"}
+                    # Ici, IP autorisée et jeton déjà vérifiés : la session d'ORION Control est authentifiée.
+                    return api.foundation.admin(method, route, query, data, session=f"control@{ip}")
                 if route[:1] == ["modules"]:
                     if api.modules is None:
                         return 404, {"status": "error", "error": "modules_disabled"}

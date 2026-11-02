@@ -190,6 +190,10 @@ n'est pas un cherry-pick : il garderait la trace des commits et simplifierait le
 
 ## 8. Plan d'exécution — lot F1 du CORE FOUNDATION
 
+**État (2 novembre 2026) :** F1 livré sur `v3`, non déployé. Vos arbitrages du 2 novembre sont appliqués : deux
+niveaux d'arrêt (`suspended`, `emergency_stop`), réactivation depuis ORION Control seul, registre chaîné. Le résultat,
+les mécanismes effectivement en place et les écarts sont décrits dans `foundation.md`. Le plan initial suit.
+
 **Objectif :** poser les permissions centrales, l'interrupteur d'autonomie et le registre d'actions dans
 `orion/platform`, sans changer le comportement de la V2 ni des modules v3 existants.
 

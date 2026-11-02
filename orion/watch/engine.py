@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from orion.events import Event, EventBus
@@ -320,9 +320,9 @@ class WatchEngine(BaseModule):
     def _alert(self, watch: Watch, alert: Alert) -> None:
         if self._alerts is None:
             return
-        if watch.channel == "written":
-            alert = Alert(alert.source, alert.title, alert.message, alert.level, alert.key, alert.call_allowed,
-                          alert.private, True, alert.details)
+        # Surveillance créée par vous : tâche programmée (CORE FOUNDATION F1), pas une initiative du module.
+        alert = replace(alert, origin=f"delegated:watch:{watch.id}", written_only=watch.channel == "written"
+                        or alert.written_only)
         self._alerts.deliver(alert)
 
     # --- Évaluation des conditions (règles) ------------------------------------------------------------------

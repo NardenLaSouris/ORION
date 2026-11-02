@@ -568,6 +568,12 @@ min_call_interval_minutes = 15.0
 dedup_hours = 12.0
 critical_ignores_quiet = false   # true : une alerte critique peut appeler pendant les heures calmes
 
+# CORE FOUNDATION (docs/v3/foundation.md) : permissions centrales, interrupteur d'autonomie (suspendu par défaut,
+# réactivé depuis ORION Control seulement), registre d'actions chaîné. false : comportement V2 inchangé.
+[platform]
+enabled = false
+database = "data/orion_ops.db"
+
 # Surveillances (docs/v3/watch.md). Sources : [watch.sources.<nom>] type = "rss" | "offers_json", url, reliability.
 [watch]
 enabled = false

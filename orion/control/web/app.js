@@ -687,8 +687,61 @@
     });
   }
 
+  // --- CORE FOUNDATION : interrupteur d'autonomie, registre d'actions, autorisations ----------------------
+  // Réactiver : ici seulement, après confirmation et la phrase exacte (vérifiée aussi par le Core).
+
+  const AUTONOMY = { active: "Active", suspended: "Suspendue", emergency_stop: "Arrêt d'urgence" };
+  const REACTIVATE = "réactiver l'autonomie";
+
+  async function autonomyView() {
+    let status;
+    try {
+      status = await api("GET", "/autonomy");
+    } catch (error) {
+      view.replaceChildren(el("h1", {}, "Autonomie"), el("div", { class: "banner" }, error.message),
+        el("p", { class: "muted" }, "Activez [platform] dans la configuration du Core (docs/v3/foundation.md)."));
+      return;
+    }
+    const [ledger, integrity, grants] = await Promise.all([api("GET", "/ledger?limit=100"), api("GET", "/ledger/verify"),
+      api("GET", "/grants")]);
+    const set = async (target) => {
+      const body = { state: target, reason: "ORION Control" };
+      const strict = { active: 0, suspended: 1, emergency_stop: 2 };
+      if ((strict[target] ?? 9) < (strict[status.state] ?? 9)) {
+        if (!confirm(`Réactiver l'autonomie (« ${AUTONOMY[target]} ») ?`)) return;
+        const phrase = prompt(`Pour confirmer, tapez : ${REACTIVATE}`);
+        if (phrase === null) return;
+        body.confirmation = phrase;
+      } else if (target === "emergency_stop" && !confirm("Arrêt d'urgence : plus aucune action autonome. Continuer ?")) {
+        return;
+      }
+      await act(api("POST", "/autonomy", body), `Autonomie : ${AUTONOMY[target]}`);
+      show("autonomy");
+    };
+    view.replaceChildren(
+      el("h1", {}, "Autonomie"),
+      cards([["État", AUTONOMY[status.state] || status.state, status.since ? `depuis le ${stamp(status.since)} (${status.changed_by})` : "réglage par défaut"],
+        ["Registre d'actions", `${integrity.count} lignes`, integrity.ok ? "chaînage intact" : `ALTÉRÉ à la ligne ${integrity.broken_at} : ${integrity.problem}`],
+        ["Empreinte", integrity.head.slice(0, 16) + "…", "à noter pour comparer plus tard"]]),
+      el("div", { class: "row" },
+        button("Activer", () => set("active"), "primary"),
+        button("Suspendre", () => set("suspended")),
+        button("Arrêt d'urgence", () => set("emergency_stop"), "danger")),
+      el("p", { class: "muted small" }, "Suspendue : plus aucune initiative des modules ; vos tâches programmées continuent. "
+        + "Arrêt d'urgence : plus aucune action autonome. La voix peut suspendre ou arrêter, jamais réactiver."),
+      el("h2", {}, "Autorisations"),
+      table(["Principal", "Capacité", "Limites", "Échéance", "État", ""], grants.map((g) => [g.principal, g.capability,
+        JSON.stringify(g.limits), stamp(g.expires_at), g.revoked_at ? `révoquée ${stamp(g.revoked_at)}` : "valide",
+        g.revoked_at ? "" : button("Révoquer", async () => { await act(api("DELETE", `/grants/${encodeURIComponent(g.id)}`), "Autorisation révoquée"); show("autonomy"); }, "danger")]),
+        "Aucune autorisation : les actions sensibles autonomes demandent votre confirmation."),
+      el("h2", {}, "Registre d'actions"),
+      table(["#", "Heure", "Origine", "Capacité", "Action", "Décision", "Raison"], ledger.entries.map((e) => [e.id, stamp(e.at),
+        e.principal, e.capability, e.action, e.decision, e.reason]), "Registre vide."));
+  }
+
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
-    news: newsView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView };
+    news: newsView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView,
+    autonomy: autonomyView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],
     ["visage", "Comme le visage d'ORION (sa couleur du moment)"], ["jarvis", "ORION (jour)"],

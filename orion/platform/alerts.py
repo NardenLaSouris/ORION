@@ -8,6 +8,10 @@ Règles (déterministes, jamais décidées par le LLM) :
 - niveau INFO : rien n'est envoyé, l'alerte est seulement gardée (historique d'ORION Control) ;
 - même clé (``key``) déjà envoyée dans la fenêtre de dédoublonnage : gardée comme « dédoublonnée », rien n'est envoyé.
 
+Moteur central des permissions (CORE FOUNDATION F1, ``permit``) : chaque alerte est soumise (NOTIFY) au nom de son
+origine (``origin`` : ``delegated:…`` pour ce que vous avez programmé, sinon ``module:<source>``) ; refusée, elle est
+seulement gardée. Un appel demande en plus la capacité CALL.
+
 Chaque alerte est enregistrée avec ses canaux, ce qui a été refusé et pourquoi : ORION Control en montre l'historique.
 Les heures calmes ne sont jamais contournées, sauf réglage explicite ``critical_ignores_quiet`` (niveau CRITICAL).
 """
@@ -74,6 +78,11 @@ class Alert:
     private: bool = False  # texte privé : seul le titre est dit ou écrit
     written_only: bool = False  # choix de l'utilisateur pour cette source : jamais de voix ni d'appel
     details: dict = field(default_factory=dict)
+    origin: str = ""  # principal (CORE FOUNDATION) ; vide : initiative du module « module:<source> »
+
+    @property
+    def principal(self) -> str:
+        return self.origin or f"module:{self.source}"
 
     def __post_init__(self) -> None:
         if not self.title.strip() or not self.message.strip():
@@ -128,8 +137,10 @@ class AlertRouter:
                  call: Callable[[str], bool] | None = None,
                  write: Callable[[str], bool] | None = None,
                  clock: Callable[[], float] = time.time,
-                 now: Callable[[], datetime] = datetime.now):
+                 now: Callable[[], datetime] = datetime.now,
+                 permit: Callable[..., Any] | None = None):
         self._store = store
+        self._permit = permit  # PermissionEngine.decide, s'il existe
         self.settings = settings = settings or AlertSettings()
         self._presence, self._speak, self._call, self._write = presence, speak, call, write
         self._clock, self._now = clock, now
@@ -167,6 +178,8 @@ class AlertRouter:
                               deduplicated=True)
         if alert.level == Level.INFO:
             return self._save(delivery_id, alert, presence, (), {"tout": "niveau info : gardée seulement"}, "gardée")
+        if refusal := self._refused(alert, "NOTIFY"):
+            return self._save(delivery_id, alert, presence, (), {"tout": refusal}, "bloquée")
         quiet = in_quiet_hours(self._now(), self.settings.quiet_start, self.settings.quiet_end)
         bypass = quiet and alert.level == Level.CRITICAL and self.settings.critical_ignores_quiet
         channels: list[str] = []
@@ -194,6 +207,8 @@ class AlertRouter:
                 skipped[CALL] = "heures calmes"
             elif refusal := self._calls.refusal("", now):
                 skipped[CALL] = refusal
+            elif refusal := self._refused(alert, "CALL"):
+                skipped[CALL] = refusal
             else:
                 self._send(CALL, self._call, alert, channels, skipped)
                 if CALL in channels:
@@ -202,6 +217,14 @@ class AlertRouter:
         if not channels:
             log.warning("Alerte « %s » (%s) : aucun canal disponible (%s)", alert.title, alert.source, skipped)
         return self._save(delivery_id, alert, presence, tuple(channels), skipped, status)
+
+    def _refused(self, alert: Alert, capability: str) -> str:
+        """Raison du refus du moteur central, ou "" (permis, ou pas de moteur)."""
+        if self._permit is None:
+            return ""
+        verdict = self._permit(alert.principal, capability, {"level": int(alert.level)},
+                               action=f"alert:{alert.source}")
+        return "" if verdict.allowed else f"permission : {verdict.reason}"
 
     @staticmethod
     def _send(name: str, send: Callable[[str], bool] | None, alert: Alert, channels: list[str],

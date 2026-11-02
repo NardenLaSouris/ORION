@@ -402,6 +402,14 @@ class ModulesConfig:
 
 
 @dataclass(frozen=True)
+class PlatformConfig:
+    """CORE FOUNDATION (docs/v3/foundation.md) : permissions centrales, interrupteur d'autonomie, registre d'actions.
+    Désactivé : comportement V2 inchangé."""
+    enabled: bool = False
+    database: Path = Path("data/orion_ops.db")
+
+
+@dataclass(frozen=True)
 class WatchConfig:
     enabled: bool = False
     default_interval_minutes: float = 60.0
@@ -477,6 +485,7 @@ class Config:
     mail: MailConfig = MailConfig()
     call: CallConfig = CallConfig()
     modules: ModulesConfig = ModulesConfig()
+    platform: PlatformConfig = PlatformConfig()
     watch: WatchConfig = WatchConfig()
     news: NewsConfig = NewsConfig()
     evolve: EvolveConfig = EvolveConfig()
@@ -607,6 +616,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "mail": MailConfig,
         "call": CallConfig,
         "modules": ModulesConfig,
+        "platform": PlatformConfig,
         "watch": WatchConfig,
         "news": NewsConfig,
         "evolve": EvolveConfig,

@@ -4,6 +4,8 @@
   après l'autre ; un fil de fond appelle ``tick`` chaque seconde (``start``), les tests l'appellent directement.
 - Une action qui échoue est journalisée ; la tâche est reprogrammée plus tard (attente doublée à chaque échec,
   plafonnée) et retrouve son rythme au premier succès. Une tâche ne s'exécute jamais deux fois en même temps.
+- Arrêt d'urgence (``halted``, CORE FOUNDATION F1) : vérifié avant chaque tâche, pas seulement au début du tour ;
+  tant qu'il dure, plus rien ne part, et une tâche due attend la reprise. Un état illisible vaut arrêt.
 - Rien n'est persisté ici : chaque module recrée ses tâches au démarrage à partir de sa base (et de la date de sa
   dernière exécution), ce qui suffit à survivre aux redémarrages.
 """
@@ -34,8 +36,10 @@ class Job:
 
 
 class Scheduler:
-    def __init__(self, clock: Callable[[], float] = time.time, max_backoff: float = MAX_BACKOFF):
+    def __init__(self, clock: Callable[[], float] = time.time, max_backoff: float = MAX_BACKOFF,
+                 halted: Callable[[], bool] | None = None):
         self._clock = clock
+        self.halted = halted
         self._max_backoff = max_backoff
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -76,7 +80,12 @@ class Scheduler:
             for job in due:
                 job.running = True
         ran = []
-        for job in due:
+        for index, job in enumerate(due):
+            if self._halted():
+                for waiting in due[index:]:
+                    waiting.running = False  # reste due : partira à la reprise
+                log.warning("Planificateur : arrêt d'urgence, %d tâche(s) retenue(s)", len(due) - index)
+                break
             try:
                 job.action()
                 job.failures, job.last_error = 0, ""
@@ -91,6 +100,15 @@ class Scheduler:
                 job.running = False
                 ran.append(job.id)
         return ran
+
+    def _halted(self) -> bool:
+        if self.halted is None:
+            return False
+        try:
+            return bool(self.halted())
+        except Exception:  # noqa: BLE001 - état illisible : on s'arrête
+            log.exception("Planificateur : état d'arrêt illisible")
+            return True
 
     def status(self) -> list[dict]:
         with self._lock:

@@ -143,5 +143,14 @@ class Store:
 
 
 def _statements(sql: str) -> list[str]:
-    """Découpe un script de migration en instructions (les migrations n'utilisent ni déclencheurs ni « ; » en texte)."""
-    return [s.strip() for s in sql.split(";") if s.strip()]
+    """Découpe un script de migration en instructions complètes : un déclencheur (« BEGIN … ; END ») reste entier."""
+    statements, buffer = [], ""
+    for part in sql.split(";"):
+        buffer += part + ";"
+        if sqlite3.complete_statement(buffer):
+            if buffer.strip().rstrip(";").strip():
+                statements.append(buffer.strip().rstrip(";").strip())
+            buffer = ""
+    if buffer.strip().rstrip(";").strip():
+        statements.append(buffer.strip().rstrip(";").strip())
+    return statements

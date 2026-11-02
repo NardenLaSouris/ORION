@@ -74,12 +74,14 @@ class PurchaseEngine(BaseModule):
     def __init__(self, store: Store, payment: pv.PaymentProvider, merchant: pv.Merchant, *,
                  settings: PurchaseSettings | None = None, alerts: AlertRouter | None = None,
                  events: EventBus | None = None, history: History | None = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, gate=None):
         self.settings = settings or PurchaseSettings()
         if not self.settings.sandbox or not payment.sandbox or not merchant.sandbox:
             raise PurchaseError("aucun paiement réel dans cette version : bac à sable seulement")
         self._store, self._payment, self._merchant = store, payment, merchant
         self._alerts, self._events, self._clock = alerts, events, clock
+        # Moteur central des permissions (CORE FOUNDATION F1) : principal « delegated:purchase », tâche = mandat.
+        self._gate = gate
         self._history = history or History(store, clock)
         self._lock = threading.RLock()
         self._unsubscribe = None
@@ -210,6 +212,13 @@ class PurchaseEngine(BaseModule):
             order = Order(mandate.id, key, safe_offer, total, created_at=self._clock())
             self._save_order(order, "préparée")
         level = self.effective_level(mandate, total)
+        if level > 1 and self._gate is not None:
+            verdict = self._gate.check("SPEND", {"amount": total}, action=f"purchase:{order.id}", task=mandate.id)
+            if verdict.decision.value == "deny":
+                self._move(order, BLOCKED, f"permission : {verdict.reason}")
+                return order
+            if not verdict.allowed:
+                level = 1  # sans autorisation bornée du moteur central : votre confirmation
         if level == 1:
             self._move(order, AWAITING_CONFIRMATION, "confirmation demandée")
             self._alert(order, "Achat à confirmer", f"{offer.get('titre')} chez {offer.get('vendeur')} : {total:.2f} € "
@@ -244,7 +253,7 @@ class PurchaseEngine(BaseModule):
             raise PurchaseError("seul l'utilisateur confirme un achat")
         order = self._order(order_id)
         self._move(order, CONFIRMED, "confirmée par l'utilisateur")
-        return self.place_order(order_id).as_dict()
+        return self.place_order(order_id, confirmed=True).as_dict()
 
     def cancel(self, order_id: str, reason: str = "annulée par l'utilisateur") -> dict:
         with self._lock:
@@ -269,7 +278,8 @@ class PurchaseEngine(BaseModule):
                 mandate.state, mandate.state)
         return ""
 
-    def place_order(self, order_id: str) -> Order:
+    def place_order(self, order_id: str, confirmed: bool = False) -> Order:
+        """Paiement d'une commande confirmée ; ``confirmed`` : confirmée par vous (sinon : automatique, mandat)."""
         with self._lock:
             order = self._order(order_id)
             if order.state != CONFIRMED:
@@ -291,6 +301,13 @@ class PurchaseEngine(BaseModule):
                 self._move(order, BLOCKED, f"devis du moment refusé : {why}")
                 self._alert(order, "Achat bloqué", f"Commande non passée : {why}.", Level.NORMAL)
                 return order
+            if self._gate is not None:  # au moment de payer, avec le montant final : arrêt d'urgence compris
+                verdict = self._gate.check("SPEND", {"amount": total}, action=f"purchase:{order.id}",
+                                           confirmed=confirmed, task=mandate.id)
+                if not verdict.allowed:
+                    self._move(order, BLOCKED, f"permission : {verdict.reason}")
+                    self._alert(order, "Achat bloqué", f"Commande non passée : {verdict.reason}.", Level.NORMAL)
+                    return order
             mandate.reserved = round(mandate.reserved + total, 2)  # budget réservé avant de payer
             self._save_mandate(mandate)
             self._move(order, PAYING, "paiement demandé")
@@ -383,7 +400,8 @@ class PurchaseEngine(BaseModule):
     def _alert(self, order: Order, title: str, message: str, level: Level) -> None:
         if self._alerts is not None:
             self._alerts.deliver(Alert("purchase", title, message, level, key=f"{order.id}:{order.state}",
-                                       call_allowed=level >= Level.HIGH))
+                                       call_allowed=level >= Level.HIGH,
+                                       origin=f"delegated:purchase:{order.mandate_id}"))  # votre mandat
 
     def orders(self) -> list[dict]:
         return [loads(r["data"], {}) for r in self._store.query("SELECT data FROM purchase_orders ORDER BY at DESC "

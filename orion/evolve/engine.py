@@ -107,8 +107,9 @@ class EvolveEngine(BaseModule):
     def __init__(self, store: Store, workspace: Workspace | None, *, settings: EvolveSettings | None = None,
                  llm: StructuredLLM | None = None, alerts: AlertRouter | None = None,
                  scheduler: Scheduler | None = None, history: History | None = None,
-                 logs: Callable[[], list[str]] | None = None, clock: Callable[[], float] = time.time):
+                 logs: Callable[[], list[str]] | None = None, clock: Callable[[], float] = time.time, gate=None):
         self._store, self.workspace, self._llm, self._alerts = store, workspace, llm, alerts
+        self._gate = gate  # moteur central des permissions (CORE FOUNDATION F1) : « module:evolve »
         self._defaults = settings or EvolveSettings()
         self._scheduler = scheduler or Scheduler(clock)
         self._history = history or History(store, clock)
@@ -275,11 +276,18 @@ class EvolveEngine(BaseModule):
 
     # --- Correctifs (niveau 2) -------------------------------------------------------------------------------
 
-    def patch(self, origin: str, edits: list[dict] | None = None, message: str = "") -> dict:
+    def patch(self, origin: str, edits: list[dict] | None = None, message: str = "", confirmed: bool = False) -> dict:
         """``origin`` : signature d'une anomalie logicielle, ou identifiant d'une proposition **acceptée**.
-        ``edits`` fournis (ORION Control) ou rédigés par le LLM. Rend l'état du correctif."""
+        ``edits`` fournis (ORION Control) ou rédigés par le LLM. Rend l'état du correctif. ``confirmed`` : demandé
+        par vous depuis ORION Control."""
         for action in (policy.BRANCH, policy.EDIT, policy.TEST):
             policy.require(self.level, action)
+        if self._gate is not None:  # écriture de code, dans l'espace isolé seulement
+            from orion.platform.permissions import PermissionDenied
+
+            verdict = self._gate.check("CODE_CHANGE", {"sandbox": True}, action="evolve:patch", confirmed=confirmed)
+            if not verdict.allowed:
+                raise PolicyError(f"permission : {verdict.reason}") from PermissionDenied(verdict)
         if self.workspace is None:
             raise PolicyError("aucun espace de travail configuré")
         context = self._patch_context(origin)
@@ -395,7 +403,8 @@ class EvolveEngine(BaseModule):
                     return 200, self.patches()
                 if method == "POST":
                     body = data or {}
-                    return 201, self.patch(str(body.get("origin", "")), body.get("edits"), str(body.get("message", "")))
+                    return 201, self.patch(str(body.get("origin", "")), body.get("edits"), str(body.get("message", "")),
+                                          confirmed=True)
             if parts == ["proposals"]:
                 if method == "GET":
                     return 200, self.proposals()

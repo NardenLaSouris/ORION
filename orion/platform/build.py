@@ -79,13 +79,17 @@ def _owner(cfg) -> str:
     return next((u.id for u in build_profiles(cfg).users() if u.role == "owner"), "")
 
 
-def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -> V3Modules | None:
+def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
+             foundation=None) -> V3Modules | None:
+    """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
+    planificateur s'arrête net sur arrêt d'urgence."""
     wanted = [name for name in ("watch", "news", "evolve", "purchase") if getattr(cfg, name).enabled]
     if not wanted:
         return None
     m = cfg.modules
     store = Store(m.database)
-    scheduler = Scheduler()
+    permits = foundation.permissions if foundation is not None else None  # moteur central (CORE FOUNDATION)
+    scheduler = Scheduler(halted=(lambda: permits.suspended_for("delegated:scheduler")) if permits else None)
     history = History(store)
     owner = _owner(cfg)
     modules: V3Modules | None = None
@@ -106,7 +110,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
     alerts = AlertRouter(store, AlertSettings(m.quiet_start, m.quiet_end, m.max_calls_per_day,
                                               m.min_call_interval_minutes, m.dedup_hours, m.critical_ignores_quiet),
                          presence=is_home, speak=speak, call=lambda text: modules.call(text),
-                         write=lambda text: modules.write(text))
+                         write=lambda text: modules.write(text),
+                         permit=permits.decide if permits else None)
     structured = StructuredLLM(llm, available=lambda: not getattr(llm, "degraded", False)) if llm is not None \
         else None
     registry, tools = ModuleRegistry(), []
@@ -157,7 +162,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
         workspace = Workspace(Path(e.workspace), e.repository or str(code_root), [code_root])
         registry.register(EvolveEngine(store, workspace, settings=EvolveSettings(e.level, e.scan_minutes,
                                                                                  tuple(e.journal_units), e.remote),
-                                       llm=structured, alerts=alerts, scheduler=scheduler, history=history))
+                                       llm=structured, alerts=alerts, scheduler=scheduler, history=history,
+                                       gate=permits.gate("module:evolve") if permits else None))
     if "purchase" in wanted:
         from orion.purchase import PurchaseEngine, PurchaseSettings, SandboxMerchant, SandboxPayment
         from orion.purchase.tools import purchase_tools
@@ -169,7 +175,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
         purchase = PurchaseEngine(store, SandboxPayment(), SandboxMerchant(), alerts=alerts, events=events,
                                   history=history, settings=PurchaseSettings(p.level, p.sandbox, p.allow_level3,
                                                                              p.per_purchase_max, p.period_max,
-                                                                             p.period_days))
+                                                                             p.period_days),
+                                  gate=permits.gate("delegated:purchase") if permits else None)
         registry.register(purchase)
         tools += purchase_tools(purchase)
     modules = V3Modules(store, scheduler, alerts, registry, tools)

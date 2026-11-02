@@ -978,13 +978,21 @@ def build_agent(
         call_rules, rule_tools = build_call_rules(cfg, llm, presence, timers, mailbox, mail_actions)
         extra += rule_tools
     from orion.platform.build import build_v3
+    from orion.platform.foundation import build_foundation
 
+    # CORE FOUNDATION (permissions centrales, autonomie, registre) : rien n'est créé si [platform] est désactivé.
+    foundation = build_foundation(cfg)
+    if foundation is not None and cfg.tools.enabled:
+        extra += foundation.tools()  # « suspends ton autonomie », « arrêt d'urgence » (jamais de réactivation)
     # Modules V3 (WATCH, NEWS, EVOLVE, PURCHASE) : rien n'est créé si aucun n'est activé (comportement V2).
-    v3 = build_v3(cfg, events=events, llm=llm, presence=presence, notifications=notifications)
+    v3 = build_v3(cfg, events=events, llm=llm, presence=presence, notifications=notifications,
+                  foundation=foundation)
     if v3 is not None and cfg.tools.enabled:
         extra += v3.tools
     tools = build_tools(cfg, personality, events, timers, weather, devices,
                         light_tools_for(rooms, driver, cfg.lights.scenes, home), extra)
+    if tools is not None and foundation is not None:
+        tools.permissions = foundation.wrap(tools.permissions)  # le moteur central s'ajoute, sans rien remplacer
     speaker["core"] = tools
     if call_rules is not None and cfg.call.flex:
         connect_flex(cfg, call_rules, tools, notifications, devices, rooms, presence, watcher, mail_actions, web,
@@ -1074,6 +1082,10 @@ def build_agent(
     calls = build_calls(cfg, source, sink, events)
     if call_rules is not None and calls is not None:
         call_rules.connect(calls, events)  # démarre aussi le fil des échéances
+    if calls is not None and foundation is not None:
+        calls.permit = foundation.permissions.decide  # règles d'appel et appels d'absence : tâches programmées
+    if api is not None:
+        api.foundation = foundation  # ORION Control : autonomie, registre d'actions, autorisations
     if calls is not None and api is not None:
         api.calls = calls  # appel d'essai par l'API d'administration (POST /api/call), jamais automatique
     if v3 is not None:

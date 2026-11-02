@@ -423,11 +423,13 @@ class NewsEngine(BaseModule):
                 "entries": loads(row.get("entries"), [])}
 
     def page(self, fresh: bool = True) -> tuple[dict, str]:
-        """Dernier bulletin mis en page (HTML) ; s'il date de plus de 6 h (ou n'existe pas), un aperçu est composé."""
+        """Dernier bulletin mis en page (HTML) ; s'il date de plus de 6 h, n'existe pas ou précède la mise en page, un
+        aperçu est composé."""
         from orion.news.page import render_html
 
         latest = self.latest_bulletin()
-        if fresh and (latest is None or self._clock() - latest["at"] > PAGE_STALE):
+        old_format = latest is not None and not latest["entries"] and latest["stories"]  # avant la mise en page
+        if fresh and (latest is None or old_format or self._clock() - latest["at"] > PAGE_STALE):
             self.bulletin(deliver=False)
             latest = self.latest_bulletin()
         return latest, render_html(latest)

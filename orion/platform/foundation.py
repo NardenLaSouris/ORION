@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from orion.platform.autonomy import CONTROL, VOICE, AutonomyError, AutonomyState, AutonomySwitch
+from orion.platform.eventhub import Event, EventHub, InterruptionPolicy
 from orion.platform.ledger import ActionLedger
 from orion.platform.permissions import Capability, Decision, PermissionEngine
 from orion.platform.store import Store
@@ -67,16 +68,41 @@ class Foundation:
         self.autonomy = AutonomySwitch(store, self.ledger)
         self.permissions = PermissionEngine(store, ledger=self.ledger, autonomy=self.autonomy)
         self.tasks = TaskService(store, self.permissions)
+        self.events = EventHub(store, permit=self.permissions.decide)
+        self.configure("22:30", "08:00")  # valeurs de [modules] posées ensuite par la fabrique
+        self._stopped_at: float | None = None
+        self.autonomy.on_change(self._after_change)
         # Arrêt d'urgence : les tâches en cours reçoivent l'ordre de s'arrêter à leur prochain point de contrôle.
         self.autonomy.on_change(lambda before, after: self.tasks.request_stop_all("arrêt d'urgence")
                                 if after is AutonomyState.EMERGENCY_STOP else None)
 
+    def configure(self, quiet_start: str, quiet_end: str, critical_ignores_quiet: bool = False) -> None:
+        """Heures calmes de la règle d'interruption (celles des modules, [modules])."""
+        from orion.notifications.manager import QUIET_EXEMPT
+
+        self.events.policy = InterruptionPolicy(quiet_start, quiet_end, critical_ignores_quiet, QUIET_EXEMPT)
+
+    def _after_change(self, before, after) -> None:
+        """Arrêt d'urgence : on note quand. Reprise : récapitulatif des notifications manquées (jamais rejouées)."""
+        if after is AutonomyState.EMERGENCY_STOP:
+            self._stopped_at = self.events._clock()  # noqa: SLF001
+            return
+        if before is AutonomyState.EMERGENCY_STOP:
+            text = self.events.recap(since=self._stopped_at)
+            self._stopped_at = None
+            if text:
+                self.events.publish(Event("system.recap", "recap", "delegated:system", "Notifications manquées",
+                                          text + " Dites « mes notifications manquées » pour les entendre.",
+                                          expires_at=self.events._clock() + 2 * 3600))  # noqa: SLF001
+
     def start(self) -> None:
-        """Tâches persistantes : reprise des tâches interrompues, puis fil d'exécution."""
+        """Tâches persistantes (reprise des interrompues), puis remises d'événements en attente."""
         self.tasks.start()
+        self.events.start()
 
     def stop(self) -> None:
         self.tasks.stop()
+        self.events.stop()
 
     def wrap(self, gate):
         return FoundationGate(gate, self.permissions)
@@ -107,6 +133,35 @@ class Foundation:
             return ("C'est fait, monsieur : mon autonomie est suspendue. Vos tâches programmées continuent ; "
                     "la reprise se fait depuis ORION Control.")
 
+        def missed() -> dict:
+            items = self.events.missed(include_obsolete=True)
+            return {"items": [{"title": i["title"], "source": i["source"], "obsolete": i["obsolete"],
+                               "at": i["created_at"]} for i in items][:10], "count": len(items)}
+
+        def say_missed(result: dict) -> str:
+            if not result["count"]:
+                return "Vous n'avez manqué aucune notification, monsieur."
+            from datetime import datetime
+
+            lines = [f"{n}, {i['title']} à {datetime.fromtimestamp(i['at']):%H h %M}"
+                     + (" (obsolète)" if i["obsolete"] else "") for n, i in enumerate(result["items"], 1)]
+            return (f"{result['count']} notification{'s' if result['count'] > 1 else ''} manquée"
+                    f"{'s' if result['count'] > 1 else ''} : " + " ; ".join(lines) + ". Je peux en relancer une.")
+
+        def relaunch(position: int) -> dict:
+            items = self.events.missed(include_obsolete=True)
+            if not 1 <= position <= len(items):
+                return {"status": "unknown"}
+            return {"status": self.events.relaunch(items[position - 1]["id"], by=VOICE),
+                    "title": items[position - 1]["title"]}
+
+        def say_relaunch(result: dict) -> str:
+            if result["status"] == "relaunched":
+                return f"Je vous la redonne : {result['title']}."
+            if result["status"] == "obsolete":
+                return f"« {result['title']} » est devenue sans objet : je ne la rejoue pas."
+            return "Je ne trouve pas cette notification manquée."
+
         reason = {"reason": Param(str, "raison, si elle a été dite", required=False, max_length=200)}
         return [
             Tool("suspend_autonomy", "Suspend les initiatives autonomes d'ORION (« suspends ton autonomie », « mets "
@@ -115,6 +170,13 @@ class Foundation:
             Tool("emergency_stop", "Arrêt d'urgence : plus aucune action autonome, tâches programmées comprises "
                  "(« arrêt d'urgence », « arrête tout ce que tu fais seule »).", reason,
                  {"state": "état"}, Risk.SAFE, stop, say=say),
+            Tool("missed_notifications", "Notifications manquées pendant un arrêt d'urgence (« mes notifications "
+                 "manquées », « qu'est-ce que j'ai raté ? »).", {}, {"count": "nombre"}, Risk.SAFE, missed,
+                 say=say_missed, capability="READ"),
+            Tool("relaunch_missed", "Redonne une notification manquée, par son numéro dans la liste (« relance la "
+                 "deuxième »). Jamais une notification devenue obsolète.",
+                 {"position": Param(int, "numéro dans la liste des notifications manquées", minimum=1, maximum=50)},
+                 {"status": "résultat"}, Risk.SAFE, relaunch, say=say_relaunch, capability="NOTIFY"),
         ]
 
     # --- API d'administration (ORION Control) -----------------------------------------------------------------
@@ -161,6 +223,18 @@ class Foundation:
         if len(route) == 3 and route[0] == "tasks" and method == "POST" and route[2] in ("cancel", "retry", "confirm"):
             ok = getattr(self.tasks, route[2])(route[1], by=CONTROL)
             return (200, {"status": "ok"}) if ok else (409, {"status": "error", "error": "not_applicable"})
+        if route == ["events"] and method == "GET":
+            return 200, {"events": self.events.recent(int((query.get("limit") or [100])[0])),
+                         "pending": self.events.pending()}
+        if route == ["events", "missed"] and method == "GET":
+            return 200, self.events.missed(include_obsolete=True)
+        if len(route) == 3 and route[0] == "events" and method == "POST" and route[2] in ("relaunch", "dismiss"):
+            if route[2] == "relaunch":
+                status = self.events.relaunch(route[1], by=CONTROL)
+                code = {"relaunched": 200, "obsolete": 409}.get(status, 404)
+                return code, {"status": status}
+            ok = self.events.dismiss(route[1], by=CONTROL)
+            return (200, {"status": "ok"}) if ok else (404, {"status": "error", "error": "not_found"})
         if route == ["confirmations"] and method == "GET":
             return 200, self.permissions.confirmations.pending()
         if len(route) == 3 and route[0] == "confirmations" and method == "POST" and route[2] in ("approve", "refuse"):

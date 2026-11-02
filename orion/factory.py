@@ -1033,6 +1033,8 @@ def build_agent(
         # Annonces vocales (rappels, minuteurs, agenda, routines, mails) soumises au moteur central ; une annonce en
         # file est revérifiée juste avant d'être dite (l'arrêt d'urgence passe avant la file).
         notifications.permit = foundation.permissions.decide
+        foundation.configure(cfg.modules.quiet_start, cfg.modules.quiet_end, cfg.modules.critical_ignores_quiet)
+        notifications.attach_hub(foundation.events)  # F3 : événement, décision et remise séparés et persistants
         if voice is not None:
             voice.still_allowed = lambda n: foundation.permissions.blocked(n.metadata["principal"], "NOTIFY")
     speaker["core"] = tools

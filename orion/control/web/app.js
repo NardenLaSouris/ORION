@@ -738,8 +738,13 @@
         el("p", { class: "muted" }, "Activez [platform] dans la configuration du Core (docs/v3/foundation.md)."));
       return;
     }
-    const [ledger, integrity, grants, tasks, confirmations] = await Promise.all([api("GET", "/ledger?limit=100"),
-      api("GET", "/ledger/verify"), api("GET", "/grants"), api("GET", "/tasks"), api("GET", "/confirmations")]);
+    const [ledger, integrity, grants, tasks, confirmations, missed, events] = await Promise.all([api("GET", "/ledger?limit=100"),
+      api("GET", "/ledger/verify"), api("GET", "/grants"), api("GET", "/tasks"), api("GET", "/confirmations"),
+      api("GET", "/events/missed"), api("GET", "/events?limit=40")]);
+    const eventAction = async (e, verb, done) => {
+      await act(api("POST", `/events/${encodeURIComponent(e.id)}/${verb}`), done);
+      show("autonomy");
+    };
     const taskAction = async (task, verb, done) => {
       if (verb === "confirm" && !confirm(`Autoriser une fois « ${task.kind} » (${task.capability}) ?`)) return;
       await act(api("POST", `/tasks/${encodeURIComponent(task.id)}/${verb}`), done);
@@ -779,6 +784,17 @@
         JSON.stringify(g.limits), stamp(g.expires_at), g.revoked_at ? `révoquée ${stamp(g.revoked_at)}` : "valide",
         g.revoked_at ? "" : button("Révoquer", async () => { await act(api("DELETE", `/grants/${encodeURIComponent(g.id)}`), "Autorisation révoquée"); show("autonomy"); }, "danger")]),
         "Aucune autorisation : les actions sensibles autonomes demandent votre confirmation."),
+      el("h2", {}, "Notifications manquées"),
+      table(["Heure", "Notification", "Source", "État", ""], missed.map((m) => [stamp(m.created_at), m.title, m.source,
+        m.obsolete ? "obsolète (jamais rejouée)" : "manquée", el("div", { class: "row" },
+          m.obsolete ? "" : button("Relancer", () => eventAction(m, "relaunch", "Notification relancée"), "primary"),
+          button("Ignorer", () => eventAction(m, "dismiss", "Notification ignorée")))]),
+        "Aucune notification manquée."),
+      el("h2", {}, "Événements récents"),
+      table(["Heure", "Type", "Origine", "Priorité", "Décision", "Remise"], events.events.map((e) => [stamp(e.created_at),
+        e.type, e.principal, e.priority, e.decision ? `${e.decision.outcome} — ${e.decision.reason}` : "",
+        e.deliveries.map((d) => `${d.channel} : ${d.status}${d.attempts > 1 ? ` (${d.attempts} essais)` : ""}`).join(", ")]),
+        "Aucun événement."),
       el("h2", {}, "Confirmations en attente"),
       table(["Demande", "Origine", "Action", "État", "Expire", ""], confirmations.map((c) => [c.summary || c.id,
         c.principal, c.action, c.state, stamp(c.expires_at), el("div", { class: "row" },

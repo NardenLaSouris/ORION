@@ -135,7 +135,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                               m.min_call_interval_minutes, m.dedup_hours, m.critical_ignores_quiet),
                          presence=is_home, speak=speak, call=lambda text: modules.call(text),
                          write=lambda text: modules.write(text),
-                         permit=permits.decide if permits else None)
+                         permit=permits.decide if permits else None,
+                         hub=foundation.events if foundation is not None else None)
     structured = StructuredLLM(llm, available=lambda: not getattr(llm, "degraded", False)) if llm is not None \
         else None
     registry, tools = ModuleRegistry(), []

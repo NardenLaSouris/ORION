@@ -355,7 +355,8 @@ def test_without_foundation_tool_decisions_are_unchanged():
 def test_voice_tools_suspend_and_stop_and_none_reactivates():
     foundation = Foundation(Store())
     tools = {t.name: t for t in foundation.tools()}
-    assert set(tools) == {"suspend_autonomy", "emergency_stop"}
+    assert set(tools) == {"suspend_autonomy", "emergency_stop", "missed_notifications", "relaunch_missed"}
+    assert not any("reactiv" in name or "resume" in name for name in tools)  # jamais de réactivation à la voix
     assert all("réactiv" not in t.description.lower() for t in tools.values())
     result = tools["emergency_stop"].run()
     assert result["state"] == "emergency_stop" and "ORION Control" in tools["emergency_stop"].say(result)

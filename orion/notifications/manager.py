@@ -9,6 +9,10 @@ agenda, routine, annonce des mails) part sous ``delegated:<source>`` et continue
 initiative (échéance trouvée dans un mail) sous ``module:<source>`` ; tout s'arrête sur arrêt d'urgence. Les alertes
 des modules V3 (source ``alerts``) ont déjà été décidées par le routeur d'alertes. Le principal retenu est ajouté aux
 métadonnées (``principal``) : le canal vocal le revérifie juste avant de parler.
+
+F3 (``hub``, posé avec la plateforme) : chaque notification devient un événement normalisé ; la décision (permission,
+échéance, heures calmes) et la remise (persistante, retentée) sont celles du hub. Refusée pendant l'arrêt d'urgence,
+elle est gardée comme notification manquée (récapitulatif à la reprise, relance manuelle), jamais rejouée seule.
 """
 
 from __future__ import annotations
@@ -26,7 +30,13 @@ log = logging.getLogger(__name__)
 # Source -> principal ; "" : déjà décidé ailleurs. Source absente : initiative du module « module:<source> ».
 SOURCE_PRINCIPALS = {"timer": "delegated:timer", "reminder": "delegated:reminder", "calendar": "delegated:calendar",
                      "routines": "delegated:routine", "flex": "delegated:flex", "mail": "delegated:mail",
-                     "alerts": ""}
+                     "recap": "delegated:system", "alerts": ""}
+# Validité d'une notification (au-delà, une notification manquée est obsolète : jamais rejouée).
+TTL = {"timer": 3600.0, "reminder": 6 * 3600.0, "calendar": 2 * 3600.0, "mail": 3 * 86400.0, "routines": 3600.0,
+       "recap": 2 * 3600.0}
+# Heure fixée par vous : jamais différée par les heures calmes.
+QUIET_EXEMPT = frozenset({"timer", "reminder", "calendar", "routines", "flex", "recap"})
+PRIORITIES = {0: "low", 1: "normal", 2: "high"}
 AUTONOMOUS = re.compile(r"^(module|delegated):[a-z][a-z0-9_]{0,30}(:[\w.@\-]{1,120})?$")
 
 
@@ -57,6 +67,21 @@ class NotificationManager:
         self._channels: dict[str, NotificationChannel] = {}
         self._disabled: set[str] = set()
         self.permit: Callable[..., Any] | None = None  # PermissionEngine.decide (CORE FOUNDATION), s'il existe
+        self.hub = None  # EventHub (CORE FOUNDATION F3), s'il existe
+
+    def attach_hub(self, hub) -> None:
+        """Les notifications passent désormais par le hub ; il remet les annonces par ce gestionnaire (« voix »)."""
+        self.hub = hub
+        hub.channel("voix", self._from_event)
+
+    def _from_event(self, event: dict) -> bool:
+        data = event.get("data") or {}
+        notification = Notification(event["title"][:80], (event["body"] or event["title"])[:500], event["source"],
+                                    Priority(data.get("priority", 1)), {**data.get("metadata", {}),
+                                                                        "principal": event["principal"],
+                                                                        "event_id": event["id"]})
+        publish(self._events, NOTIFICATION_CREATED, notification)
+        return bool(self._send_all(notification))
 
     @staticmethod
     def principal_of(notification: Notification) -> str:
@@ -110,12 +135,39 @@ class NotificationManager:
     def notify(self, notification: Notification) -> list[str]:
         """Remet la notification aux canaux actifs qui l'acceptent ; rend leurs noms (aucun si le moteur central la
         refuse)."""
+        if self.hub is not None:
+            return self._through_hub(notification)
         refusal, notification = self._refusal(notification)
         if refusal:
             log.info("Notification « %s » (%s) retenue : %s", notification.title, notification.source, refusal)
             publish(self._events, NOTIFICATION_FAILED, notification, None, refusal)
             return []
         publish(self._events, NOTIFICATION_CREATED, notification)
+        return self._send_all(notification)
+
+    def _through_hub(self, notification: Notification) -> list[str]:
+        from orion.platform.eventhub import ANNOUNCE, Event
+
+        principal = self.principal_of(notification) or "delegated:system"
+        metadata = {k: v for k, v in notification.metadata.items() if k != "principal"}
+        try:
+            outcome = self.hub.publish(Event(f"notification.{notification.source}", notification.source, principal,
+                                             notification.title, notification.message,
+                                             PRIORITIES.get(int(notification.priority), "normal"),
+                                             str(metadata.get("dedup") or ""),
+                                             notification.created_at + TTL.get(notification.source, 6 * 3600.0),
+                                             data={"metadata": metadata, "priority": int(notification.priority)}))
+        except Exception:  # noqa: BLE001 - hub en panne : échec sûr (rien n'est dit sans décision)
+            log.exception("Notification « %s » : hub indisponible", notification.title)
+            publish(self._events, NOTIFICATION_FAILED, notification, None, "hub des événements indisponible")
+            return []
+        if outcome.outcome != ANNOUNCE:
+            log.info("Notification « %s » : %s (%s)", notification.title, outcome.outcome, outcome.reason)
+            publish(self._events, NOTIFICATION_FAILED, notification, None, f"{outcome.outcome} : {outcome.reason}")
+            return []
+        return [name for name in self._channels if name not in self._disabled]
+
+    def _send_all(self, notification: Notification) -> list[str]:
         used = []
         for name, channel in list(self._channels.items()):
             if name in self._disabled or not channel.accepts(notification):

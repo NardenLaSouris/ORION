@@ -13,6 +13,9 @@ origine (``origin`` : ``delegated:…`` pour ce que vous avez programmé, sinon 
 seulement gardée. Un appel demande en plus la capacité CALL.
 
 Chaque alerte est enregistrée avec ses canaux, ce qui a été refusé et pourquoi : ORION Control en montre l'historique.
+F3 : le choix des canaux suit la règle d'interruption commune (``InterruptionPolicy.route``, orion/platform/eventhub.py)
+et chaque alerte est aussi inscrite comme événement normalisé avec sa décision (``hub``) ; refusée pendant l'arrêt
+d'urgence, elle devient une notification manquée, jamais rejouée toute seule.
 Les heures calmes ne sont jamais contournées, sauf réglage explicite ``critical_ignores_quiet`` (niveau CRITICAL).
 """
 
@@ -53,6 +56,7 @@ MIGRATIONS = (
 
 HOME, AWAY, UNKNOWN = "home", "away", "unknown"
 VOICE, CALL, WRITTEN = "voix", "appel", "écrit"
+PRIORITY = {0: "low", 1: "normal", 2: "high", 3: "critical"}  # niveau d'alerte -> priorité d'événement (F3)
 MAX_TITLE, MAX_MESSAGE = 120, 900
 
 
@@ -141,10 +145,14 @@ class AlertRouter:
                  write: Callable[[str], bool] | None = None,
                  clock: Callable[[], float] = time.time,
                  now: Callable[[], datetime] = datetime.now,
-                 permit: Callable[..., Any] | None = None):
+                 permit: Callable[..., Any] | None = None, hub=None):
+        from orion.platform.eventhub import InterruptionPolicy
+
         self._store = store
         self._permit = permit  # PermissionEngine.decide, s'il existe
+        self.hub = hub  # EventHub (CORE FOUNDATION F3), s'il existe
         self.settings = settings = settings or AlertSettings()
+        self.policy = InterruptionPolicy(settings.quiet_start, settings.quiet_end, settings.critical_ignores_quiet)
         self._presence, self._speak, self._call, self._write = presence, speak, call, write
         self._clock, self._now = clock, now
         self._calls = RateLimiter(max(1, settings.max_calls_per_day), 86400.0, settings.min_call_interval_minutes * 60,
@@ -183,32 +191,17 @@ class AlertRouter:
             return self._save(delivery_id, alert, presence, (), {"tout": "niveau info : gardée seulement"}, "gardée")
         if refusal := self._refused(alert, "NOTIFY"):
             return self._save(delivery_id, alert, presence, (), {"tout": refusal}, "bloquée")
-        quiet = in_quiet_hours(self._now(), self.settings.quiet_start, self.settings.quiet_end)
-        bypass = quiet and alert.level == Level.CRITICAL and self.settings.critical_ignores_quiet
+        plan = self.policy.route(PRIORITY[int(alert.level)], presence, self.policy.quiet(self._now()),
+                                 written_only=alert.written_only, call_allowed=alert.call_allowed)
         channels: list[str] = []
-        skipped: dict[str, str] = {}
-        if alert.written_only:
-            skipped[VOICE] = skipped[CALL] = "message écrit seulement (choix de l'utilisateur)"
+        skipped: dict[str, str] = dict(plan.skipped)
+        senders = {VOICE: self._speak, WRITTEN: self._write}
+        for name in plan.sequence:
+            self._send(name, senders[name], alert, channels, skipped)
+        if plan.voice_fallback and VOICE not in channels:  # enceintes indisponibles : l'écrit prend le relais
             self._send(WRITTEN, self._write, alert, channels, skipped)
-        elif presence == HOME:
-            if quiet and not bypass:
-                skipped[VOICE] = "heures calmes : message écrit à la place"
-                self._send(WRITTEN, self._write, alert, channels, skipped)
-            else:
-                self._send(VOICE, self._speak, alert, channels, skipped)
-                if VOICE not in channels:  # enceintes indisponibles : l'écrit prend le relais
-                    self._send(WRITTEN, self._write, alert, channels, skipped)
-        else:
-            self._send(WRITTEN, self._write, alert, channels, skipped)
-            if presence == UNKNOWN:
-                skipped[CALL] = "présence inconnue : jamais d'appel"
-            elif alert.level < Level.HIGH:
-                skipped[CALL] = "niveau insuffisant pour un appel"
-            elif not alert.call_allowed:
-                skipped[CALL] = "appel non autorisé par le module"
-            elif quiet and not bypass:
-                skipped[CALL] = "heures calmes"
-            elif refusal := self._calls.refusal("", now):
+        if plan.call:
+            if refusal := self._calls.refusal("", now):
                 skipped[CALL] = refusal
             elif refusal := self._refused(alert, "CALL"):
                 skipped[CALL] = refusal
@@ -253,8 +246,24 @@ class AlertRouter:
                               "AND status IN ('envoyée', 'gardée') LIMIT 1", (alert.source, alert.key, since))
         return row is not None
 
+    def _record(self, alert: Alert, status: str, channels: tuple[str, ...], skipped: dict) -> None:
+        """Événement normalisé et décision, dans le hub (F3) ; jamais bloquant pour l'alerte elle-même."""
+        if self.hub is None:
+            return
+        from orion.platform.eventhub import ANNOUNCE, DENIED, DUPLICATE, KEPT, Event
+
+        outcome = {"envoyée": ANNOUNCE, "bloquée": DENIED, "dédoublonnée": DUPLICATE}.get(status, KEPT)
+        try:
+            self.hub.record(Event(f"alert.{alert.source}", alert.source, alert.principal, alert.title,
+                                  "" if alert.private else alert.message, PRIORITY[int(alert.level)], alert.key,
+                                  private=alert.private), outcome, channels,
+                            "; ".join(f"{k} : {v}" for k, v in skipped.items())[:200])
+        except Exception:  # noqa: BLE001 - le journal des événements ne bloque jamais une alerte
+            log.exception("Alerte : inscription de l'événement impossible")
+
     def _save(self, delivery_id: str, alert: Alert, presence: str, channels: tuple[str, ...], skipped: dict,
               status: str, deduplicated: bool = False) -> Delivery:
+        self._record(alert, status, channels, skipped)
         self._store.write("INSERT INTO alerts (id, at, source, key, level, title, message, presence, channels, "
                             "skipped, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             (delivery_id, self._clock(), alert.source, alert.key, int(alert.level), alert.title,

@@ -26,7 +26,7 @@ from orion.interfaces import (
     AudioSink, AudioSource, LanguageModel, Message, SpeechToText, TextToSpeech, WakeWordDetector,
 )
 from orion.call.rule_tools import NEEDS_DETAILS
-from orion.call.rules import is_acknowledgement
+from orion.call.rules import ACK_HINT, is_acknowledgement, sounds_like_acknowledgement
 from orion.presence.declaration import parse_declaration
 from orion.router import IntentRouter, Route
 from orion.flex import FLEX_SWITCH, PHONE_OPENING, is_flex
@@ -173,6 +173,14 @@ AGREE_ALONE = {"oui", "ouais", "vas y", "allez", "d accord", "ok", "okay", "oui 
                "je veux bien", "oui je veux bien"}
 AGREE_START = re.compile(r"^(?:oui )?(?:lis|lit|lire|resume|qu est ce qu il dit|qu est ce qu elle dit|"
                          r"qu est ce que ca dit|de quoi ca parle|c est quoi ce mail|il dit quoi)(?: |$)")
+
+
+ACKED = "C'est noté, monsieur. Je ne vous rappellerai pas à ce sujet."
+# Appel qui attend « c'est noté » : une phrase courte mal transcrite (confiance de Whisper sous ce seuil) donne lieu
+# à une question fermée plutôt qu'à une réponse au hasard (« Synthesit. », « Saluté. » : journal du 2 novembre 2026).
+ACK_UNCLEAR_CONFIDENCE = -0.6
+ACK_QUESTION = "Pardon, je vous ai mal entendu. Est-ce noté ? Dites oui ou non."
+ACK_REFUSED = "Très bien, monsieur. Je vous écoute."
 
 
 def agrees(text: str) -> bool:
@@ -349,6 +357,7 @@ class Agent:
         self._clarify: dict | None = None  # outil en attente d'une précision (règle d'appel incomplète)
         self._in_call = None  # appel décroché, pris par la prochaine conversation
         self._call = None  # appel de la conversation en cours (« c'est noté » acquitte celui-là)
+        self._ack_asked = False  # « Est-ce noté ? » vient d'être demandé : « oui » acquitte l'appel
         # Messages Linphone : réponse écrite (rien n'est prononcé), fil gardé MESSAGE_THREAD secondes.
         self._texting = False
         # Un fil par canal écrit (« message » : Linphone, « wallpaper » : fond d'écran) : (historique, dernier usage).
@@ -416,6 +425,7 @@ class Agent:
                 log.exception("Reprise après erreur incomplète")
         self._follow_up = None
         self._in_call = self._call = None
+        self._ack_asked = False
         self._lead = []
 
     def _wait_for_wake_word(self) -> bool:
@@ -567,7 +577,7 @@ class Agent:
         self._router.start_conversation()
         offer, self._follow_up = self._follow_up, None
         call, self._in_call = self._in_call, None
-        self._call = call
+        self._call, self._ack_asked = call, False
         if call is not None:
             self._greet_call(call)
         elif offer is None:
@@ -659,7 +669,7 @@ class Agent:
             speech_ended_at = self._recorder.speech_ended_at
 
             started = time.perf_counter()
-            text = self._stt.transcribe(audio, self._source.sample_rate)
+            text = self._transcribe(audio)
             latency["stt"] = time.perf_counter() - started
             if not text:
                 self._event("stt", "(rien compris)")
@@ -698,6 +708,44 @@ class Agent:
         self._event("sleep", "Retour en veille")
         return understood
 
+    def _awaiting_ack(self) -> bool:
+        return (self._call is not None and self._call_rules is not None
+                and self._call_rules.awaiting_ack(self._call.id) is not None)
+
+    def _transcribe(self, audio: np.ndarray) -> str:
+        """Pendant un appel qui attend « c'est noté », Whisper l'attend aussi (mots attendus, GPU comme secours)."""
+        base = getattr(self._stt, "hotwords", None)
+        biased = isinstance(base, str) and self._awaiting_ack()
+        if biased:
+            self._stt.hotwords = ", ".join(x for x in (ACK_HINT, base) if x)
+        try:
+            return self._stt.transcribe(audio, self._source.sample_rate)
+        finally:
+            if biased:
+                self._stt.hotwords = base
+
+    def _call_acknowledgement(self, history: list[Message], text: str, latency: dict):
+        """Appel d'une règle qui attend « c'est noté » : (réponse, fin) si la phrase y répond, sinon None."""
+        asked, self._ack_asked = self._ack_asked, False
+        norm = normalize(text)
+        if ((is_acknowledgement(text) or sounds_like_acknowledgement(text) or (asked and agrees(text)))
+                and self._call_rules.acknowledge(self._call.id)):
+            latency["route"] = "appel:accusé"
+            self._event("routing", latency["route"])
+            return self._say_text(history, text, ACKED, latency), True
+        if asked and re.match(r"(?:non|pas encore|pas du tout)\b", norm):
+            latency["route"] = "appel:accusé refusé"
+            self._event("routing", latency["route"])
+            return self._say_text(history, text, ACK_REFUSED, latency), False
+        confidence = getattr(self._stt, "last_confidence", None)
+        if (not asked and len(norm.split()) <= 4 and isinstance(confidence, (int, float))
+                and confidence < ACK_UNCLEAR_CONFIDENCE):
+            self._ack_asked = True
+            latency["route"] = "appel:accusé ?"
+            self._event("routing", latency["route"])
+            return self._say_text(history, text, ACK_QUESTION, latency), False
+        return None
+
     def _reply_to(self, history: list[Message], text: str, offer, latency: dict, speech_ended_at=None):
         """Une demande comprise, dite ou écrite (message Linphone) -> (réponse, fin de conversation) : confirmation
         en attente, annonce acceptée, sources, contexte, outils ou conversation. Réponse None : déjà dite (commande
@@ -735,10 +783,9 @@ class Agent:
             self._event("routing", latency["route"])
             return self._run_call(history, f"{clarify['text']} ; précision : {text}",
                                   {"type": "tool_call", "tool": clarify["tool"], "parameters": {}}, latency), False
-        if (self._call_rules is not None and self._call is not None and is_acknowledgement(text)
-                and self._call_rules.acknowledge(self._call.id)):
-            return self._say_text(history, text, "C'est noté, monsieur. Je ne vous rappellerai pas à ce sujet.",
-                                  latency), True
+        if not self._texting and self._awaiting_ack():
+            if (acknowledged := self._call_acknowledgement(history, text, latency)) is not None:
+                return acknowledged
         if (self._call_rules is not None and self._texting and is_acknowledgement(text)
                 and self._call_rules.acknowledge()):
             return self._say_text(history, text, "C'est noté, monsieur.", latency), False

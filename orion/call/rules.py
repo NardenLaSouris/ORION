@@ -87,6 +87,13 @@ ACK = re.compile(r"^(?:(?:c est |cest )?(?:note|bien note|bien recu|recu|compris
                  r"ca marche|je m en occupe|je gere|je sais|merci|oui|vu)(?: \w+){0,3})$")
 
 
+# Au téléphone, « C'est noté » arrive souvent déformé (« C'est nous », « et notez » : journal des 28 octobre et
+# 2 novembre 2026) : pendant un appel qui attend l'accusé, une phrase courte qui sonne comme lui compte aussi.
+ACK_HINT = "C'est noté."  # mots attendus donnés à Whisper pendant cet appel
+ACK_SOUND_MIN = 0.75  # « C'est nous » 0,77, « et notez » 0,77 ; « C'est nul » et « C'est bon » 0,71 ne comptent pas
+NOT_ACK = re.compile(r"\b(?:ne|n|pas|jamais|plus|non|rien)\b")
+
+
 class RuleError(ValueError):
     pass
 
@@ -94,6 +101,20 @@ class RuleError(ValueError):
 def is_acknowledgement(text: str) -> bool:
     """« C'est noté », « bien reçu », « je m'en occupe » : vous avez compris le motif de l'appel."""
     return bool(ACK.match(normalize(text).replace("orion ", "").replace(" monsieur", "")))
+
+
+def sounds_like_acknowledgement(text: str) -> bool:
+    """« C'est nous », « et notez », « Sénoté » : « c'est noté » mal transcrit (trois mots au plus, aucune négation :
+    « C'est pas noté » ne compte jamais)."""
+    from difflib import SequenceMatcher
+
+    from orion.phonetic import key
+
+    norm = normalize(text).replace("orion ", "").replace(" monsieur", "").strip()
+    words = norm.split()
+    if not words or len(words) > 3 or NOT_ACK.search(norm):
+        return False
+    return SequenceMatcher(None, key("".join(words)), key("cestnote")).ratio() >= ACK_SOUND_MIN
 
 
 # --- Validation (Core) ---------------------------------------------------------------------------------------

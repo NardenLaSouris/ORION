@@ -196,6 +196,8 @@ def planner_prompt(registry: ToolRegistry) -> str:
         rules.append("- Fichiers : jamais de chemin, un nom de fichier tel qu'il a été dit (le dossier est déduit de la "
                      "demande, jamais un paramètre) ; destination de copy_file et move_file : dossier dit (documents, "
                      "bureau, téléchargements). Supprimer un dossier, exécuter un fichier ou toucher au système -> none.")
+    if registry.exists("news_bulletin"):
+        rules.append("- « Quelles sont les actualités / les infos / les nouvelles ? », « le bulletin » : news_bulletin.")
     if registry.exists("create_watch"):
         rules.append("- « Surveille… », « préviens-moi quand » un prix baisse, un produit revient en stock, un événement "
                      "de jeu ou une annonce officielle sort : create_watch (information extérieure), jamais "
@@ -388,6 +390,8 @@ DOMAIN_WORDS = {
                         "previens", "prevenir", "n oublie", "oublie pas", "souviens", "noter", "note"),
     # Règles d'appel : seulement quand l'utilisateur parle d'appel ou de règle.
     "create_call_rule": ("appelle moi", "appelez moi", "previens moi", "ecris moi", "telephone moi"),
+    "news_bulletin": ("actualite", "actualites", "actu", "actus", "infos", "informations", "nouvelles", "bulletin",
+                      "journal", "news"),
     # WATCH (V3) : une information extérieure à surveiller.
     "create_watch": ("surveille", "surveiller", "surveillez", "surveillance", "previens moi", "prix", "disponible",
                      "en stock", "bonne affaire", "annonce", "sortie", "pokemon"),

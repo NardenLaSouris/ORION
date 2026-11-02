@@ -90,13 +90,36 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
     structured = StructuredLLM(llm, available=lambda: not getattr(llm, "degraded", False)) if llm is not None \
         else None
     registry, tools = ModuleRegistry(), []
+    news = None
+    if "news" in wanted:
+        from orion.news import Feed, NewsEngine, NewsSettings
+        from orion.news.tools import news_tools
+
+        n = cfg.news
+        feeds = []
+        for name, spec in (n.feeds or {}).items():
+            if not isinstance(spec, dict) or not isinstance(spec.get("url"), str) or not spec.get("category"):
+                raise ValueError(f"[news] feeds.{name} : « url » et « category » attendues")
+            feeds.append(Feed(name, spec["url"], spec["category"], spec.get("reliability", "media")))
+        news = NewsEngine(store, feeds, alerts=alerts, scheduler=scheduler, history=history,
+                          llm=structured if n.use_llm else None,
+                          settings=NewsSettings(tuple(n.bulletin_times), tuple(n.categories), dict(n.thresholds), {},
+                                                n.max_calls_per_day, n.min_call_interval_minutes,
+                                                collect_minutes=n.collect_minutes))
+        registry.register(news)
+        tools += news_tools(news)
     if "watch" in wanted:
         from orion.watch import WatchEngine, WatchSettings
         from orion.watch.connectors import build_connectors
         from orion.watch.tools import watch_tools
 
         w = cfg.watch
-        engine = WatchEngine(store, build_connectors(w.sources), alerts=alerts, scheduler=scheduler, history=history,
+        connectors = build_connectors(w.sources)
+        if news is not None:
+            from orion.news import NewsConnector
+
+            connectors.register(NewsConnector(news))  # « préviens-moi si l'on annonce… » à partir des actualités
+        engine = WatchEngine(store, connectors, alerts=alerts, scheduler=scheduler, history=history,
                              events=events, llm=structured,
                              settings=WatchSettings(w.default_interval_minutes, w.min_interval_minutes,
                                                     w.requests_per_source_per_hour, w.failure_limit, w.opportunity))

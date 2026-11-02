@@ -93,3 +93,24 @@ def test_refused_call_is_not_counted_as_delivered(tmp_path):
         assert v3.alerts.deliver(Alert("watch", "T2", "M.", Level.HIGH, key="d")).channels == ()
     finally:
         v3.stop()
+
+
+def test_news_and_watch_together_share_the_news_source(tmp_path):
+    cfg = config(tmp_path, watch={"enabled": True},
+                 news={"enabled": True, "feeds": {"afp": {"url": "https://afp.test/rss", "category": "geopolitique",
+                                                          "reliability": "agency"}}})
+    v3 = build_v3(cfg, presence=Presence(None), notifications=Notifications())
+    try:
+        assert {"news_bulletin", "create_watch"} <= {t.name for t in v3.tools}
+        assert v3.registry.get("watch").connectors.names() == ["news"]
+        assert v3.registry.order() == ["news", "watch"]
+    finally:
+        v3.stop()
+
+
+def test_invalid_news_feed_is_refused_by_name(tmp_path):
+    import pytest
+
+    cfg = config(tmp_path, news={"enabled": True, "feeds": {"cassé": {"url": "https://x.test"}}})
+    with pytest.raises(ValueError, match="feeds.cassé"):
+        build_v3(cfg)

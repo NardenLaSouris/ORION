@@ -145,3 +145,19 @@ def test_sounds_like_acknowledgement_thresholds():
     assert like("C'est nous") and like("et notez") and like("c'est noté monsieur")
     assert not like("C'est nul") and not like("C'est bon") and not like("C'est pas noté")
     assert not like("Rappelle-moi plus tard") and not like("Salut") and not like("")
+
+
+@pytest.mark.parametrize("heard", ["Steam. C'est noté.", "Bon ben c'est noté.", "Euh, c'est nous.", "Oui oui, et notez."])
+def test_cest_note_at_the_end_after_noise_acknowledges_directly(heard):
+    calls = FakeCalls(reason="Pensez au test.", answers=3)
+    rules = FakeRules(calls.call.id)
+    spoken, _ = run_agent([heard], PlannerLLM(reply="?"), calls=calls, call_rules=rules, confidence=-0.9)
+    assert rules.acknowledged == [calls.call.id] and spoken[1] == ACKED  # sans question
+
+
+def test_ending_rule_keeps_its_limits():
+    from orion.call.rules import sounds_like_acknowledgement as like
+    assert like("Steam. C'est noté.") and like("Bon ben c'est noté")
+    assert not like("Steam. Ce n'est pas noté.") and not like("Non, c'est pas noté")
+    assert not like("Je le ferai demain matin, c'est noté")  # six mots : une vraie phrase, pas un accusé
+    assert not like("Rappelle-moi ce soir c'est nul") and not like("Quel temps fait-il demain")

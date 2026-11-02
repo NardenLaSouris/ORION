@@ -134,6 +134,7 @@ class CallMedia:
         self.mic: ByteStream | None = None
         self._out_rate = 0
         self._out_resampler = None
+        self._tasks: set[asyncio.Task] = set()  # tâches gardées : la boucle n'en garde qu'une référence faible
 
     def _run(self, coro, timeout: float = 15.0):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout)
@@ -156,7 +157,9 @@ class CallMedia:
         @pc.on("track")
         def on_track(track):
             if track.kind == "audio":
-                asyncio.ensure_future(self._pump(track, mic))
+                task = asyncio.ensure_future(self._pump(track, mic))
+                self._tasks.add(task)  # sinon le relais du micro peut être ramassé en plein appel (silence)
+                task.add_done_callback(self._tasks.discard)
 
         @pc.on("connectionstatechange")
         async def on_state():

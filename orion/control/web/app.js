@@ -702,8 +702,17 @@
         el("p", { class: "muted" }, "Activez [platform] dans la configuration du Core (docs/v3/foundation.md)."));
       return;
     }
-    const [ledger, integrity, grants] = await Promise.all([api("GET", "/ledger?limit=100"), api("GET", "/ledger/verify"),
-      api("GET", "/grants")]);
+    const [ledger, integrity, grants, tasks, confirmations] = await Promise.all([api("GET", "/ledger?limit=100"),
+      api("GET", "/ledger/verify"), api("GET", "/grants"), api("GET", "/tasks"), api("GET", "/confirmations")]);
+    const taskAction = async (task, verb, done) => {
+      if (verb === "confirm" && !confirm(`Autoriser une fois « ${task.kind} » (${task.capability}) ?`)) return;
+      await act(api("POST", `/tasks/${encodeURIComponent(task.id)}/${verb}`), done);
+      show("autonomy");
+    };
+    const decide = async (c, verb, done) => {
+      await act(api("POST", `/confirmations/${encodeURIComponent(c.id)}/${verb}`), done);
+      show("autonomy");
+    };
     const set = async (target) => {
       const body = { state: target, reason: "ORION Control" };
       const strict = { active: 0, suspended: 1, emergency_stop: 2 };
@@ -734,10 +743,30 @@
         JSON.stringify(g.limits), stamp(g.expires_at), g.revoked_at ? `révoquée ${stamp(g.revoked_at)}` : "valide",
         g.revoked_at ? "" : button("Révoquer", async () => { await act(api("DELETE", `/grants/${encodeURIComponent(g.id)}`), "Autorisation révoquée"); show("autonomy"); }, "danger")]),
         "Aucune autorisation : les actions sensibles autonomes demandent votre confirmation."),
+      el("h2", {}, "Confirmations en attente"),
+      table(["Demande", "Origine", "Action", "État", "Expire", ""], confirmations.map((c) => [c.summary || c.id,
+        c.principal, c.action, c.state, stamp(c.expires_at), el("div", { class: "row" },
+          c.state === "en attente" ? button("Accorder une fois", () => decide(c, "approve", "Confirmation accordée"), "primary") : "",
+          button(c.state === "en attente" ? "Refuser" : "Retirer", () => decide(c, "refuse", "Confirmation retirée"), "danger"))]),
+        "Aucune confirmation en attente."),
+      el("h2", {}, "Tâches"),
+      table(["Tâche", "Origine", "Capacité", "État", "Prochaine exécution", "Essais", "Dernier message", ""],
+        tasks.tasks.map((t) => [t.kind, `${t.origin === "utilisateur" ? "programmée par vous" : "initiative"} (${t.principal})`,
+          t.capability, TASK_STATES[t.state] || t.state, stamp(t.run_at), `${t.attempts}/${t.max_attempts}`, t.last_error,
+          el("div", { class: "row" },
+            t.state === "held" ? button("Confirmer", () => taskAction(t, "confirm", "Tâche confirmée"), "primary") : "",
+            ["interrupted", "failed"].includes(t.state) ? button("Relancer", () => taskAction(t, "retry", "Tâche relancée")) : "",
+            ["pending", "held", "running"].includes(t.state) ? button("Annuler", () => taskAction(t, "cancel", "Tâche annulée"), "danger") : "")]),
+        "Aucune tâche persistante."),
+      el("p", { class: "muted small" }, "Une tâche interrompue en pleine exécution n'est jamais relancée seule : "
+        + "son résultat est inconnu. Les autorisations sont relues à chaque exécution."),
       el("h2", {}, "Registre d'actions"),
       table(["#", "Heure", "Origine", "Capacité", "Action", "Décision", "Raison"], ledger.entries.map((e) => [e.id, stamp(e.at),
         e.principal, e.capability, e.action, e.decision, e.reason]), "Registre vide."));
   }
+
+  const TASK_STATES = { pending: "en attente", running: "en cours", held: "à confirmer", done: "faite",
+    failed: "en échec", expired: "expirée", cancelled: "annulée", interrupted: "interrompue" };
 
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
     news: newsView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView,

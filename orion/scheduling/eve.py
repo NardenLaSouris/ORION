@@ -2,7 +2,11 @@
 règles d'appel « appelle-moi la veille… » (orion/call/rules.py, événement item_tomorrow).
 
 Lecture seule des rappels (jarvis.scheduling) et de l'agenda (jarvis.agenda) ; chaque rappel ou rendez-vous n'est
-annoncé qu'une fois. Un élément ajouté après l'heure de sa veille (rappel de 5 h créé à 1 h 42) n'est pas annoncé
+annoncé qu'une fois.
+
+Moteur central (CORE FOUNDATION F2, ``permit``) : une veille est une tâche que vous avez programmée
+(« appelle-moi la veille ») : principal ``delegated:eve``, capacité ``NOTIFY``. Refusée (arrêt d'urgence), elle est
+gardée et publiée au passage suivant après la reprise, tant que l'élément n'est pas arrivé. Un élément ajouté après l'heure de sa veille (rappel de 5 h créé à 1 h 42) n'est pas annoncé
 en retard : la veille est passée.
 """
 
@@ -31,6 +35,8 @@ class EveWatch:
         self._events, self._timers, self._calendar, self._clock, self._every = events, timers, calendar, clock, every
         self._last = clock() - timedelta(seconds=every * 2)
         self._sent: set[str] = set()
+        self._held: set[str] = set()  # veilles refusées par le moteur central, à publier à la reprise
+        self.permit: Callable[..., object] | None = None  # PermissionEngine.decide, s'il existe
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -56,14 +62,28 @@ class EveWatch:
             items = []
         for item in items:
             eve = eve_of(item["at"])
-            if self._last < eve <= now < item["at"] and item["item_key"] not in self._sent:
-                self._sent.add(item["item_key"])
+            key = item["item_key"]
+            if (self._last < eve or key in self._held) and eve <= now < item["at"] and key not in self._sent:
+                if not self._permitted(item):
+                    self._held.add(key)
+                    continue
+                self._held.discard(key)
+                self._sent.add(key)
                 payload = {**item, "at": item["at"].isoformat()}
                 self._events.publish(Event(UPCOMING, "scheduling", payload))
                 published += 1
                 log.info("Veille : %s « %s » demain", item["kind"], item["title"][:40])
         self._last = now
         return published
+
+    def _permitted(self, item: dict) -> bool:
+        if self.permit is None:
+            return True
+        try:
+            return bool(self.permit("delegated:eve", "NOTIFY", {}, action=f"eve:{item['kind']}").allowed)
+        except Exception:  # noqa: BLE001 - moteur en panne : gardée pour plus tard
+            log.exception("Veille : moteur de permissions en erreur")
+            return False
 
     def start(self) -> None:
         if self._thread is None:

@@ -6,6 +6,11 @@
   ``verify`` relit toute la chaîne et donne la première ligne altérée (modifiée, insérée ou supprimée au milieu).
   Une troncature de la fin ne se voit pas dans la chaîne seule : ``head`` (nombre de lignes et dernier résumé) est
   affiché dans ORION Control et peut être noté ailleurs pour comparaison.
+- **Signature (préparée en F2, activée avec le lot chiffrement F4).** Le chaînage seul ne résiste pas à quelqu'un
+  qui peut écrire dans la base : il peut recalculer toute la chaîne (limites détaillées dans
+  ``docs/v3/foundation.md``). Avec un ``Keyring`` (clé HMAC-SHA-256 gardée hors de la base, identifiant de clé pour
+  la rotation), chaque ligne porte aussi la signature de son résumé ; ``verify`` refuse alors une signature fausse,
+  une clé inconnue, ou une ligne non signée après la première ligne signée. Sans clé, rien ne change.
 - **Aucun texte privé.** Seuls des noms (principal, capacité, outil), des décisions, des raisons courtes et un petit
   détail sans valeur de paramètre ; tout passe par ``loggable`` (mêmes règles que le journal des outils).
 """
@@ -13,6 +18,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import threading
 import time
 from dataclasses import dataclass
@@ -41,6 +47,11 @@ MIGRATIONS = (
         CREATE TRIGGER action_ledger_no_delete BEFORE DELETE ON action_ledger
             BEGIN SELECT RAISE(ABORT, 'registre en ajout seul'); END
     """),
+    # F2 : place de la signature (vide tant qu'aucune clé n'est configurée ; ADD COLUMN n'est pas un UPDATE).
+    Migration(2, """
+        ALTER TABLE action_ledger ADD COLUMN key_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE action_ledger ADD COLUMN signature TEXT NOT NULL DEFAULT ''
+    """),
 )
 GENESIS = "0" * 64
 FIELDS = ("at", "principal", "capability", "action", "decision", "reason", "request_id", "detail")
@@ -60,6 +71,31 @@ class Integrity:
                 "problem": self.problem}
 
 
+class Keyring:
+    """Clés de signature du registre : ``keys`` {identifiant: clé}, ``current`` celle qui signe. Les anciennes clés
+    restent pour vérifier les lignes qu'elles ont signées (rotation). Les clés viennent de l'extérieur de la base
+    (identifiant systemd chiffré, lot F4) ; jamais de Git ni des journaux : ``repr`` ne les montre pas."""
+
+    def __init__(self, keys: dict[str, bytes], current: str):
+        if current not in keys:
+            raise ValueError("clé courante absente du trousseau")
+        if any(len(key) < 32 for key in keys.values()):
+            raise ValueError("clé de signature trop courte (32 octets au moins)")
+        self._keys, self.current = dict(keys), current
+
+    def __repr__(self) -> str:
+        return f"Keyring(current={self.current!r}, keys={sorted(self._keys)!r})"
+
+    def sign(self, digest: str, key_id: str | None = None) -> str:
+        return hmac.new(self._keys[key_id or self.current], digest.encode("ascii"), hashlib.sha256).hexdigest()
+
+    def check(self, digest: str, key_id: str, signature: str) -> str:
+        """Raison du refus, ou "" si la signature est bonne."""
+        if key_id not in self._keys:
+            return "clé de signature inconnue"
+        return "" if hmac.compare_digest(self.sign(digest, key_id), signature) else "signature invalide"
+
+
 def entry_hash(prev_hash: str, row: dict) -> str:
     canonical = dumps([prev_hash, *[row[name] for name in FIELDS]])
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -73,8 +109,8 @@ def _clean(detail: dict[str, Any] | None) -> str:
 
 
 class ActionLedger:
-    def __init__(self, store: Store, clock: Callable[[], float] = time.time):
-        self._store, self._clock = store, clock
+    def __init__(self, store: Store, clock: Callable[[], float] = time.time, keyring: Keyring | None = None):
+        self._store, self._clock, self._keyring = store, clock, keyring
         self._lock = threading.Lock()
         store.migrate("ledger", MIGRATIONS)
 
@@ -87,14 +123,18 @@ class ActionLedger:
         with self._lock, self._store.transaction():
             last = self._store.one("SELECT hash FROM action_ledger ORDER BY id DESC LIMIT 1")
             prev = last["hash"] if last else GENESIS
+            digest = entry_hash(prev, row)
+            key_id = self._keyring.current if self._keyring else ""
+            signature = self._keyring.sign(digest) if self._keyring else ""
             return self._store.write(
                 "INSERT INTO action_ledger (at, principal, capability, action, decision, reason, request_id, detail, "
-                "prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (*[row[name] for name in FIELDS], prev, entry_hash(prev, row)))
+                "prev_hash, hash, key_id, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (*[row[name] for name in FIELDS], prev, digest, key_id, signature))
 
     def verify(self) -> Integrity:
-        """Relit toute la chaîne : identifiants contigus, chaque ligne liée à la précédente et intacte."""
-        prev, count, expected_id = GENESIS, 0, None
+        """Relit toute la chaîne : identifiants contigus, chaque ligne liée à la précédente et intacte ; avec un
+        trousseau, signatures vérifiées dès la première ligne signée."""
+        prev, count, expected_id, signed = GENESIS, 0, None, False
         for row in self._store.query("SELECT * FROM action_ledger ORDER BY id"):
             if expected_id is not None and row["id"] != expected_id:
                 return Integrity(False, count, prev, row["id"], "ligne supprimée avant celle-ci")
@@ -102,6 +142,13 @@ class ActionLedger:
                 return Integrity(False, count, prev, row["id"], "chaînage rompu")
             if entry_hash(prev, row) != row["hash"]:
                 return Integrity(False, count, prev, row["id"], "contenu modifié")
+            if self._keyring is not None:
+                if row["signature"]:
+                    signed = True
+                    if problem := self._keyring.check(row["hash"], row["key_id"], row["signature"]):
+                        return Integrity(False, count, prev, row["id"], problem)
+                elif signed:
+                    return Integrity(False, count, prev, row["id"], "ligne non signée après une ligne signée")
             prev, count, expected_id = row["hash"], count + 1, row["id"] + 1
         return Integrity(True, count, prev)
 

@@ -6,6 +6,11 @@
   plafonnée) et retrouve son rythme au premier succès. Une tâche ne s'exécute jamais deux fois en même temps.
 - Arrêt d'urgence (``halted``, CORE FOUNDATION F1) : vérifié avant chaque tâche, pas seulement au début du tour ;
   tant qu'il dure, plus rien ne part, et une tâche due attend la reprise. Un état illisible vaut arrêt.
+- Principal de chaque tâche (F2, ``classify``) : ``delegated:…`` pour ce que vous avez programmé (surveillance,
+  bulletin aux heures réglées), ``module:…`` pour une initiative ; la capacité qu'elle exerce. Avant chaque tâche,
+  ``blocked`` (moteur central, sans registre) dit si l'état d'autonomie la retient : suspendue, une initiative de
+  module qui ne fait pas que lire attend la reprise ; la tâche s'exécute ensuite sous son principal
+  (``orion.platform.running``), que reprennent ses alertes.
 - Rien n'est persisté ici : chaque module recrée ses tâches au démarrage à partir de sa base (et de la date de sa
   dernière exécution), ce qui suffit à survivre aux redémarrages.
 """
@@ -17,6 +22,8 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
+
+from orion.platform.running import running_as
 
 log = logging.getLogger(__name__)
 
@@ -33,13 +40,17 @@ class Job:
     last_run: float | None = None
     last_error: str = ""
     running: bool = False
+    held: str = ""  # raison pour laquelle l'état d'autonomie la retient
 
 
 class Scheduler:
     def __init__(self, clock: Callable[[], float] = time.time, max_backoff: float = MAX_BACKOFF,
-                 halted: Callable[[], bool] | None = None):
+                 halted: Callable[[], bool] | None = None,
+                 classify: Callable[[str], tuple[str, str]] | None = None,
+                 blocked: Callable[[str, str], str] | None = None):
         self._clock = clock
         self.halted = halted
+        self._classify, self._blocked = classify, blocked
         self._max_backoff = max_backoff
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -86,8 +97,16 @@ class Scheduler:
                     waiting.running = False  # reste due : partira à la reprise
                 log.warning("Planificateur : arrêt d'urgence, %d tâche(s) retenue(s)", len(due) - index)
                 break
+            principal, capability = self.classify(job.id)
+            if why := self._held(principal, capability):
+                if job.held != why:
+                    log.info("Planificateur : %s retenue (%s)", job.id, why)
+                job.held, job.running = why, False  # reste due : partira à la reprise
+                continue
+            job.held = ""
             try:
-                job.action()
+                with running_as(principal):
+                    job.action()
                 job.failures, job.last_error = 0, ""
                 job.next_at = now + job.interval
             except Exception as exc:  # noqa: BLE001 - une tâche en échec ne bloque jamais les autres
@@ -101,6 +120,25 @@ class Scheduler:
                 ran.append(job.id)
         return ran
 
+    def classify(self, job_id: str) -> tuple[str, str]:
+        """(principal, capacité) de la tâche ; ("", "") sans classification (comportement F1)."""
+        if self._classify is None:
+            return "", ""
+        try:
+            return self._classify(job_id)
+        except Exception:  # noqa: BLE001 - classification impossible : initiative de module, la plus surveillée
+            log.exception("Planificateur : classification de %s impossible", job_id)
+            return f"module:{job_id.split(':', 1)[0]}", "NOTIFY"
+
+    def _held(self, principal: str, capability: str) -> str:
+        if not principal or self._blocked is None:
+            return ""
+        try:
+            return self._blocked(principal, capability)
+        except Exception:  # noqa: BLE001 - état illisible : retenue
+            log.exception("Planificateur : état d'autonomie illisible")
+            return "état de l'autonomie illisible"
+
     def _halted(self) -> bool:
         if self.halted is None:
             return False
@@ -112,8 +150,10 @@ class Scheduler:
 
     def status(self) -> list[dict]:
         with self._lock:
-            return [{"id": j.id, "interval_s": j.interval, "next_at": j.next_at, "last_run": j.last_run,
-                     "failures": j.failures, "last_error": j.last_error} for j in self._jobs.values()]
+            jobs = list(self._jobs.values())
+        return [{"id": j.id, "interval_s": j.interval, "next_at": j.next_at, "last_run": j.last_run,
+                 "failures": j.failures, "last_error": j.last_error, "principal": self.classify(j.id)[0],
+                 "retenue": j.held} for j in jobs]
 
     def start(self, poll: float = 1.0) -> None:
         if self._thread is not None:

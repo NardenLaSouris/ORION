@@ -14,6 +14,8 @@ Invariants (codés ici, vérifiés par les tests) :
 - ``SPEND``, ``DESTRUCTIVE``, ``EXTERNAL_MESSAGE`` et ``CODE_CHANGE`` : jamais permis à une origine autonome sans
   autorisation explicite, bornée (échéance et plafond) et valide ; sinon ``ask`` ;
 - ``CODE_CHANGE`` : EVOLVE seul, dans son espace isolé ;
+- confirmation (F2) : liée à une demande précise (``confirmations``), consommée une seule fois au moment d'agir ;
+- les autorisations sont relues à chaque décision : rien n'hérite d'une autorisation expirée ou révoquée ;
 - une autorisation (``Grant``) n'est créée que depuis ORION Control : aucun module ne s'accorde une capacité ; les
   modules ne reçoivent qu'un ``Gate`` à principal fixe, qui ne sait que demander.
 """
@@ -30,6 +32,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from orion.platform.autonomy import CONTROL, VOICE, AutonomyState, AutonomySwitch
+from orion.platform.confirmations import ConfirmationStore
 from orion.platform.ledger import ActionLedger
 from orion.platform.store import Migration, Store, dumps, loads
 
@@ -176,6 +179,13 @@ class GrantStore:
         sql = "SELECT * FROM permission_grants" + ("" if include_revoked else " WHERE revoked_at IS NULL")
         return [self._row(r) for r in self._store.query(sql + " ORDER BY granted_at")]
 
+    def is_active(self, grant_id: str, now: float) -> bool:
+        """Vrai si l'autorisation existe, n'est ni révoquée ni expirée (une tâche liée à une autorisation le vérifie à
+        chaque exécution)."""
+        row = self._store.one("SELECT 1 FROM permission_grants WHERE id = ? AND revoked_at IS NULL AND "
+                              "(expires_at IS NULL OR expires_at > ?)", (grant_id, now))
+        return row is not None
+
     def active_for(self, principal: str, capability: Capability, now: float) -> list[Grant]:
         rows = self._store.query("SELECT * FROM permission_grants WHERE capability = ? AND revoked_at IS NULL "
                                  "AND (expires_at IS NULL OR expires_at > ?)", (capability.value, now))
@@ -193,17 +203,23 @@ class PermissionEngine:
         self.ledger = ledger or ActionLedger(store, clock)
         self.autonomy = autonomy or AutonomySwitch(store, self.ledger, clock)
         self.grants = GrantStore(store, self.ledger, clock)
+        self.confirmations = ConfirmationStore(store, self.ledger, clock)
         self._clock = clock
         self._gates: dict[str, Gate] = {}
         self._lock = threading.Lock()
 
     def decide(self, principal: str, capability: Capability | str, context: dict[str, Any] | None = None, *,
-               action: str = "", request_id: str = "", confirmed: bool = False) -> Verdict:
-        """Décision, inscrite au registre. Toute erreur vaut refus pour une origine autonome."""
+               action: str = "", request_id: str = "", confirmed: bool = False,
+               confirmation: str = "") -> Verdict:
+        """Décision, inscrite au registre. Toute erreur vaut refus pour une origine autonome.
+
+        ``confirmation`` : identifiant d'une demande de confirmation accordée, consommée ici (une seule fois) si
+        l'action est sensible et qu'aucune autorisation ne la couvre ; elle doit correspondre au principal, à
+        l'action et au contexte exacts."""
         context = dict(context or {})
         try:
             capability = Capability(capability)
-            decision, reason, grant = self._decide(principal, capability, context, confirmed, action)
+            decision, reason, grant = self._decide(principal, capability, context, confirmed, action, confirmation)
         except Exception as exc:  # noqa: BLE001 - moteur en panne : échec sûr
             log.exception("Permissions : erreur de décision")
             decision, reason, grant = Decision.DENY, f"moteur de permissions en erreur ({type(exc).__name__})", ""
@@ -212,6 +228,7 @@ class PermissionEngine:
         try:
             entry = self.ledger.append(principal, cap, action or cap.lower(), decision.value, reason, request_id,
                                        {"confirmé": bool(confirmed), "autorisation": grant,
+                                        "demande": confirmation[:20],
                                         **{k: v for k, v in context.items() if k in ("amount", "device", "sandbox")}})
         except Exception:  # noqa: BLE001 - une action autonome non inscrite n'a pas lieu
             log.exception("Permissions : registre d'actions indisponible")
@@ -221,7 +238,7 @@ class PermissionEngine:
         return Verdict(decision, reason, entry, grant)
 
     def _decide(self, principal: str, capability: Capability, context: dict, confirmed: bool,
-                action: str = "") -> tuple[Decision, str, str]:
+                action: str = "", confirmation: str = "") -> tuple[Decision, str, str]:
         if not isinstance(principal, str) or not PRINCIPAL.match(principal):
             return Decision.DENY, "origine inconnue", ""
         if principal in TRUSTED:
@@ -246,6 +263,8 @@ class PermissionEngine:
         if capability in SENSITIVE:
             if confirmed:
                 return Decision.ALLOW, "confirmé par l'utilisateur", ""
+            if confirmation and self.confirmations.consume(confirmation, principal, action, context):
+                return Decision.ALLOW, f"confirmé (demande {confirmation[:16]})", ""
             return Decision.ASK, "action sensible : confirmation ou autorisation bornée requise", ""
         if kind == "delegated" and capability in DELEGATED_DEFAULT:
             return Decision.ALLOW, "tâche programmée par l'utilisateur", ""
@@ -274,6 +293,20 @@ class PermissionEngine:
         with self._lock:
             return self._gates.setdefault(principal, Gate(self, principal))
 
+    def blocked(self, principal: str, capability: Capability | str) -> str:
+        """Raison pour laquelle l'état d'autonomie interdit maintenant cette capacité à ce principal, ou "" ; sans
+        inscription au registre (le planificateur et les files s'en servent pour retenir une tâche, pas pour agir)."""
+        if principal in TRUSTED:
+            return ""
+        state = self.autonomy.state()
+        if state is None:
+            return "état de l'autonomie indéterminé"
+        if state is AutonomyState.EMERGENCY_STOP:
+            return "arrêt d'urgence"
+        if state is AutonomyState.SUSPENDED and kind_of(principal) == "module"                 and str(getattr(capability, "value", capability)) != Capability.READ.value:
+            return "autonomie suspendue"
+        return ""
+
     def suspended_for(self, principal: str) -> bool:
         """Vrai si ce principal ne peut plus rien faire maintenant (arrêt d'urgence, état indéterminé, ou initiative
         de module pendant la suspension) : le planificateur s'en sert avant chaque tâche."""
@@ -292,7 +325,7 @@ class Gate:
         self._engine, self.principal = engine, principal
 
     def check(self, capability: Capability | str, context: dict | None = None, *, action: str = "",
-              confirmed: bool = False, task: str = "") -> Verdict:
+              confirmed: bool = False, task: str = "", confirmation: str = "") -> Verdict:
         """``task`` : identifiant de la tâche programmée (``delegated:<type>:<task>``) quand l'action en découle."""
         principal = self.principal
         if task:
@@ -302,7 +335,7 @@ class Gate:
         from orion import trace
 
         return self._engine.decide(principal, capability, context, action=action, confirmed=confirmed,
-                                   request_id=trace.current() or "")
+                                   request_id=trace.current() or "", confirmation=confirmation)
 
     def require(self, capability: Capability | str, context: dict | None = None, **kwargs) -> Verdict:
         verdict = self.check(capability, context, **kwargs)

@@ -29,6 +29,8 @@ class VoiceNotificationChannel(NotificationChannel):
         self._lock = threading.Lock()
         self._open = True
         self._follow_up: dict | None = None  # suite proposée par la dernière annonce dite (« lis-le »)
+        # CORE FOUNDATION : raison de ne plus dire une annonce en file (arrêt d'urgence survenu entre-temps), ou "".
+        self.still_allowed: Callable[[Notification], str] | None = None
 
     def send(self, notification: Notification) -> None:
         with self._lock:
@@ -46,6 +48,10 @@ class VoiceNotificationChannel(NotificationChannel):
         """Prononce les notifications en attente, dans l'ordre, avec ``speak`` (le TTS de l'agent)."""
         delivered = 0
         while (notification := self._next()) is not None:
+            if why := self._withdrawn(notification):
+                log.info("Notification vocale « %s » retirée : %s", notification.title, why)
+                publish(self._events, NOTIFICATION_FAILED, notification, self.name, why)
+                continue
             publish(self._events, NOTIFICATION_STARTED, notification, self.name)
             try:
                 speak(notification.message)
@@ -60,6 +66,17 @@ class VoiceNotificationChannel(NotificationChannel):
                 publish(self._events, NOTIFICATION_FINISHED, notification, self.name)
             delivered += 1
         return delivered
+
+    def _withdrawn(self, notification: Notification) -> str:
+        """L'arrêt d'urgence passe avant la file : une annonce autonome en attente est revérifiée avant d'être dite."""
+        if self.still_allowed is None or not notification.metadata.get("principal"):
+            return ""
+        try:
+            why = self.still_allowed(notification)
+        except Exception:  # noqa: BLE001 - état illisible : on se tait
+            log.exception("Notification vocale : vérification impossible")
+            return "état de l'autonomie illisible"
+        return f"permission : {why}" if why else ""
 
     def take_follow_up(self) -> dict | None:
         """Suite proposée par la dernière annonce (outil à lancer si l'utilisateur acquiesce), une seule fois."""

@@ -1,5 +1,6 @@
-"""CORE FOUNDATION F1 assemblé : base opérationnelle, registre d'actions, interrupteur d'autonomie, moteur de
-permissions, et leurs raccordements (Core des outils, outils vocaux, API d'ORION Control).
+"""CORE FOUNDATION assemblé : base opérationnelle, registre d'actions, interrupteur d'autonomie, moteur de
+permissions (F1), tâches persistantes et confirmations liées à une demande (F2), et leurs raccordements (Core des
+outils, outils vocaux, API d'ORION Control).
 
 Inactif tant que ``[platform] enabled = false`` (comportement V2 inchangé). Activé, il ne remplace rien : le Core des
 outils garde ses permissions (profils, confirmations, Cedar) et le moteur central s'y ajoute ; la décision la plus
@@ -16,6 +17,7 @@ from orion.platform.autonomy import CONTROL, VOICE, AutonomyError, AutonomyState
 from orion.platform.ledger import ActionLedger
 from orion.platform.permissions import Capability, Decision, PermissionEngine
 from orion.platform.store import Store
+from orion.platform.tasks import TaskService
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +66,14 @@ class Foundation:
         self.ledger = ActionLedger(store)
         self.autonomy = AutonomySwitch(store, self.ledger)
         self.permissions = PermissionEngine(store, ledger=self.ledger, autonomy=self.autonomy)
+        self.tasks = TaskService(store, self.permissions)
+
+    def start(self) -> None:
+        """Tâches persistantes : reprise des tâches interrompues, puis fil d'exécution."""
+        self.tasks.start()
+
+    def stop(self) -> None:
+        self.tasks.stop()
 
     def wrap(self, gate):
         return FoundationGate(gate, self.permissions)
@@ -128,6 +138,22 @@ class Foundation:
         if len(route) == 2 and route[0] == "grants" and method == "DELETE":
             ok = self.permissions.grants.revoke(route[1], by=CONTROL)
             return (200, {"status": "ok"}) if ok else (404, {"status": "error", "error": "not_found"})
+        if route == ["tasks"] and method == "GET":
+            states = tuple(s for s in ((query.get("state") or [""])[0] or "").split(",") if s)
+            return 200, {"tasks": [t.as_dict() for t in self.tasks.list(states or None)], **self.tasks.status()}
+        if len(route) == 2 and route[0] == "tasks" and method == "GET":
+            task = self.tasks.get(route[1])
+            if task is None:
+                return 404, {"status": "error", "error": "not_found"}
+            return 200, {**task.as_dict(), "runs": self.tasks.runs(task.id)}
+        if len(route) == 3 and route[0] == "tasks" and method == "POST" and route[2] in ("cancel", "retry", "confirm"):
+            ok = getattr(self.tasks, route[2])(route[1], by=CONTROL)
+            return (200, {"status": "ok"}) if ok else (409, {"status": "error", "error": "not_applicable"})
+        if route == ["confirmations"] and method == "GET":
+            return 200, self.permissions.confirmations.pending()
+        if len(route) == 3 and route[0] == "confirmations" and method == "POST" and route[2] in ("approve", "refuse"):
+            ok = getattr(self.permissions.confirmations, route[2])(route[1], by=CONTROL)
+            return (200, {"status": "ok"}) if ok else (409, {"status": "error", "error": "not_applicable"})
         return 404, {"status": "error", "error": "not_found"}
 
 

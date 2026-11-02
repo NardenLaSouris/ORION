@@ -190,6 +190,15 @@ n'est pas un cherry-pick : il garderait la trace des commits et simplifierait le
 
 ## 8. Plan d'exécution — lot F1 du CORE FOUNDATION
 
+**État F2 (2 novembre 2026) :** F2 est livré sur `v3`, non déployé, conformément à votre validation du 2 novembre :
+- tâches persistantes ;
+- confirmations liées à une demande ;
+- annonces vocales et veille raccordées au moteur central ;
+- bulletins NEWS programmés distingués des initiatives, sans modifier NEWS ;
+- signature du registre préparée.
+
+Les résultats, les écarts et les risques résiduels sont dans `foundation.md`, § « Lot F2 ».
+
 **État (2 novembre 2026) :** F1 livré sur `v3`, non déployé. Vos arbitrages du 2 novembre sont appliqués : deux
 niveaux d'arrêt (`suspended`, `emergency_stop`), réactivation depuis ORION Control seul, registre chaîné. Le résultat,
 les mécanismes effectivement en place et les écarts sont décrits dans `foundation.md`. Le plan initial suit.

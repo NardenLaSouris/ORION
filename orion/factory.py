@@ -551,7 +551,9 @@ def build_mail_actions(cfg: Config, mailbox, watcher, llm, timers, notifications
         """Dit tout de suite si vous êtes là et hors heures calmes ; sinon la liste « à traiter » le garde."""
         house = presence.engine.snapshot()["house"] if presence is not None else "unknown"
         if house != "empty" and not in_quiet_hours(datetime.now(), cfg.mail.quiet_start, cfg.mail.quiet_end):
-            notifications.notify(Notification("Échéance", text, "mail"))
+            # Échéance trouvée dans un mail : initiative du module (les annonces des nouveaux mails, réglées par
+            # vous, restent « delegated:mail »).
+            notifications.notify(Notification("Échéance", text, "mail", metadata={"principal": "module:mail"}))
 
     actions = MailActions(Path(cfg.memory.path).parent / "mail_actions.json", mailbox, llm, timers, notify=notify)
     watcher.on_new = actions.received
@@ -993,6 +995,12 @@ def build_agent(
                         light_tools_for(rooms, driver, cfg.lights.scenes, home), extra)
     if tools is not None and foundation is not None:
         tools.permissions = foundation.wrap(tools.permissions)  # le moteur central s'ajoute, sans rien remplacer
+    if foundation is not None:
+        # Annonces vocales (rappels, minuteurs, agenda, routines, mails) soumises au moteur central ; une annonce en
+        # file est revérifiée juste avant d'être dite (l'arrêt d'urgence passe avant la file).
+        notifications.permit = foundation.permissions.decide
+        if voice is not None:
+            voice.still_allowed = lambda n: foundation.permissions.blocked(n.metadata["principal"], "NOTIFY")
     speaker["core"] = tools
     if call_rules is not None and cfg.call.flex:
         connect_flex(cfg, call_rules, tools, notifications, devices, rooms, presence, watcher, mail_actions, web,
@@ -1088,6 +1096,8 @@ def build_agent(
         api.foundation = foundation  # ORION Control : autonomie, registre d'actions, autorisations
     if calls is not None and api is not None:
         api.calls = calls  # appel d'essai par l'API d'administration (POST /api/call), jamais automatique
+    if foundation is not None:
+        foundation.start()  # tâches persistantes : reprise des interrompues, puis exécution
     if v3 is not None:
         v3.connect(calls)  # alertes par appel et message Linphone, puis démarrage des modules
         if api is not None:
@@ -1112,7 +1122,7 @@ def build_agent(
                  stream_audio=cfg.tts.stream_audio, merge_under=cfg.tts.merge_under, web=web,
                  tools=tools, corrector=corrector, notifications=voice, alarm=routines.alarm if routines else None,
                  services=tuple(s for s in (api, routines, timers, notifications, worker, presence, calls,
-                                                 call_rules if calls is not None else None, v3)
+                                                 call_rules if calls is not None else None, v3, foundation)
                                 if s is not None),
                  fast_path=cfg.tools.fast_path, routines=routines, profiles=build_profiles(cfg),
                  wake_verifier=build_wake_verifier(cfg), wake_captures=build_wake_captures(cfg),
@@ -1133,7 +1143,9 @@ def build_agent(
         from orion.scheduling.eve import EveWatch
 
         # « Appelle-moi la veille… » : rappels et rendez-vous du lendemain annoncés à 18 h la veille.
-        EveWatch(events, timers, calendar).start()  # fil de fond, arrêté avec ORION
+        eve = EveWatch(events, timers, calendar)
+        eve.permit = foundation.permissions.decide if foundation is not None else None
+        eve.start()  # fil de fond, arrêté avec ORION
     # Échéance proche (rendez-vous, minuteur, rappel) pour l'anneau du visage.
     agent.upcoming = Upcoming(calendar, timers) if calendar is not None or timers is not None else None
     return agent

@@ -82,7 +82,11 @@ class Alert:
 
     @property
     def principal(self) -> str:
-        return self.origin or f"module:{self.source}"
+        """Origine déclarée, sinon le principal de la tâche en cours si elle est de ce module (bulletin programmé),
+        sinon l'initiative du module."""
+        from orion.platform.running import principal_for
+
+        return self.origin or principal_for(self.source) or f"module:{self.source}"
 
     def __post_init__(self) -> None:
         if not self.title.strip() or not self.message.strip():

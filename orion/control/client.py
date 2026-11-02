@@ -89,7 +89,8 @@ class CoreClient:
         return self._call("GET", "/history?" + urlencode({"kind": kind, "limit": limit}))
 
     def platform(self, method: str, parts: list[str], query: dict | None = None, body=None):
-        """CORE FOUNDATION : /api/autonomy, /api/ledger, /api/grants, relayés tels quels (jeton du Core)."""
+        """CORE FOUNDATION : /api/autonomy, /api/ledger, /api/grants, /api/tasks, /api/confirmations, relayés tels
+        quels (jeton du Core)."""
         path = "".join("/" + quote(p, safe="") for p in parts)
         if query:
             path += "?" + urlencode(query, doseq=True)

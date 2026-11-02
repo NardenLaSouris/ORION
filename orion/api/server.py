@@ -15,6 +15,8 @@ validation, permissions). Seuls les outils sans confirmation sont exécutables i
   GET | POST /api/autonomy             interrupteur d'autonomie ([platform]) ; réactiver exige la phrase de confirmation
   GET  /api/ledger | /api/ledger/verify  registre d'actions et vérification de son chaînage
   GET  /api/grants  DELETE /api/grants/<id>  autorisations du moteur central (révocation)
+  GET  /api/tasks[/<id>]  POST /api/tasks/<id>/cancel|retry|confirm  tâches persistantes (F2)
+  GET  /api/confirmations  POST /api/confirmations/<id>/approve|refuse  confirmations liées à une demande (F2)
 """
 
 from __future__ import annotations
@@ -230,7 +232,7 @@ class CoreApi:
                     return api.presence_action(method, route[1:], data)
                 if method == "POST" and route == ["call"]:
                     return api.call_action(data)
-                if route[:1] in (["autonomy"], ["ledger"], ["grants"]):
+                if route[:1] in (["autonomy"], ["ledger"], ["grants"], ["tasks"], ["confirmations"]):
                     if api.foundation is None:
                         return 404, {"status": "error", "error": "platform_disabled"}
                     # Ici, IP autorisée et jeton déjà vérifiés : la session d'ORION Control est authentifiée.

@@ -1,6 +1,6 @@
-# CORE FOUNDATION — lot F1 : permissions centrales, autonomie, registre d'actions
+# CORE FOUNDATION — lots F1 et F2 : permissions centrales, autonomie, registre d'actions, tâches persistantes
 
-Livré sur `v3` le 2 novembre 2026, jamais déployé. Inactif par défaut (`[platform] enabled = false`) : la V2 et les
+F1 et F2 livrés sur `v3` le 2 novembre 2026, jamais déployés (F2 : § « Lot F2 » plus bas). Inactif par défaut (`[platform] enabled = false`) : la V2 et les
 modules v3 se comportent alors exactement comme avant.
 
 ## Fichiers
@@ -99,7 +99,7 @@ Routes de l'API d'administration : `GET|POST /api/autonomy`, `GET /api/ledger`, 
 2. **`grants.py` :** fusionné dans `permissions.py`.
 3. **Arrêt d'urgence :** il refuse aussi la lecture aux origines autonomes (plus strict que « sauf la lecture »). Il
    bloque aussi le paiement d'un achat que vous confirmez pendant l'arrêt.
-4. **Indicateur « confirmé » :** les modules le passent eux-mêmes. Seuls les chemins utilisateur le fixent :
+4. **Indicateur « confirmé »** (en F2 : confirmations liées à une demande, voir le lot F2) **:** les modules le passent eux-mêmes. Seuls les chemins utilisateur le fixent :
    `PurchaseEngine.confirm` et la route EVOLVE d'ORION Control. C'est une confiance interne au processus, pas une
    preuve. Lier chaque confirmation à son identifiant de demande est prévu en F2 et F3.
 5. **Ce que le registre détecte :**
@@ -108,10 +108,10 @@ Routes de l'API d'administration : `GET|POST /api/autonomy`, `GET /api/ledger`, 
    - pas une troncature de la fin : l'empreinte de tête est affichée pour comparaison.
 6. **Résultats d'exécution des outils :** ils ne sont pas inscrits au registre, seulement les décisions. Les résultats
    restent dans le journal d'activité.
-7. **Automatismes V2 hors du Core des outils et des appels :** les rappels qui sonnent, les annonces de mails et
+7. **Automatismes V2 hors du Core des outils et des appels** (raccordés en F2) **:** les rappels qui sonnent, les annonces de mails et
    `EveWatch` parlent sans passer par le moteur. Ce sont des notifications à la voix, pas des actions sur le monde.
    Leur passage par le moteur est prévu avec le service de tâches (F2).
-8. **NEWS (isolé) :** ses alertes partent sous `module:news` ; plateforme activée et autonomie suspendue, elles sont
+8. **NEWS (isolé)** (corrigé en F2, sans modifier NEWS) **:** ses alertes partent sous `module:news` ; plateforme activée et autonomie suspendue, elles sont
    donc bloquées. Faire passer les bulletins programmés en `delegated:news` demande une modification de NEWS, à
    coordonner. La plateforme étant désactivée par défaut, le développement de NEWS n'est pas affecté.
 9. **Session « authentifiée » :** c'est l'authentification existante d'ORION Control (jeton et IP autorisée). Il n'y a
@@ -119,3 +119,229 @@ Routes de l'API d'administration : `GET|POST /api/autonomy`, `GET /api/ledger`, 
 10. **Rotation du registre par ancienneté :** non faite (prévue plus tard, par export, jamais par suppression).
 11. **Correction annexe :** `Store` découpe désormais correctement les migrations qui contiennent un déclencheur
     (`BEGIN … ; END`).
+
+---
+
+# Lot F2 : tâches persistantes et corrections de F1
+
+## Fichiers
+
+| Fichier | Rôle |
+|---|---|
+| `orion/platform/tasks.py` (nouveau) | `TaskService` : tâches persistantes, réservation atomique, reprise, expiration, échecs ; `TaskGate` (accès d'un module) |
+| `orion/platform/confirmations.py` (nouveau) | `ConfirmationStore` : confirmation liée à une demande précise, à usage unique |
+| `orion/platform/running.py` (nouveau) | principal de la tâche en cours (variable de contexte posée par la plateforme) |
+| `orion/platform/permissions.py` | `blocked()` (état d'autonomie seul, sans registre) ; `decide(confirmation=…)` ; `GrantStore.is_active` |
+| `orion/platform/scheduler.py` | classification de chaque tâche périodique (principal, capacité), retenue tâche par tâche |
+| `orion/platform/build.py` | `classify_job` ; type de tâche `news.bulletin` |
+| `orion/platform/alerts.py` | `Alert.principal` reprend le principal de la tâche en cours du même module |
+| `orion/platform/ledger.py` | migration 2 (`key_id`, `signature`) ; `Keyring` (HMAC-SHA-256, rotation) |
+| `orion/notifications/manager.py`, `voice.py` | annonces soumises au moteur central ; revérification juste avant de parler |
+| `orion/scheduling/eve.py` | veille des rendez-vous soumise au moteur central |
+| `orion/factory.py`, `api/server.py`, `control/*` | raccordements ; routes et vue d'ORION Control |
+| `tests/test_platform_tasks.py` (nouveau) | 31 tests |
+
+NEWS n'est **pas modifié** (aucun fichier de `orion/news/`), conformément à la coordination demandée ; un test le
+vérifie.
+
+## Tâches programmées par vous et initiatives des modules
+
+| | Tâche programmée par vous | Initiative d'un module |
+|---|---|---|
+| Principal | `delegated:<type>:<tâche>` | `module:<nom>` |
+| Création | `schedule_for_user(by=…)` : conversation (`user`), voix, ORION Control ; toute autre origine est refusée et inscrite au registre | `TaskGate.schedule` : principal fixé, seulement les types du module marqués `module=True` |
+| Suspension | continue | retenue (sauf lecture), sans perdre d'essai ; repart à la reprise |
+| Arrêt d'urgence | retenue | retenue |
+
+La **capacité** d'une tâche vient de son type, enregistré par le code de la plateforme (`register`), jamais de celui
+qui crée la tâche ; un type ne se réenregistre pas. Aucun module ne s'accorde donc une capacité en choisissant un type.
+
+**Tâches périodiques des modules** (planificateur existant), classées par la plateforme (`classify_job`) :
+
+| Tâche | Principal | Capacité |
+|---|---|---|
+| `news:bulletins` (heures que vous avez réglées) | `delegated:news:bulletins` | `NOTIFY` |
+| `news:collect` (collecte des flux) | `module:news` | `READ` |
+| `watch:<id>` (votre surveillance) | `delegated:watch:<id>` | `READ` |
+| `evolve:scan` | `module:evolve` | `READ` |
+| inconnue | `module:<préfixe>` | `NOTIFY` (la plus surveillée) |
+
+Pendant son exécution, une tâche porte son principal (`orion.platform.running`). Une alerte du **même** module sans
+origine déclarée le reprend. Ainsi le bulletin de 8 h part sous `delegated:news:bulletins` et continue pendant la
+suspension. Une alerte spontanée, née de la collecte, reste `module:news` et est refusée pendant la suspension. C'est
+la correction de classification demandée, faite sans toucher à NEWS.
+
+## Exécution d'une tâche (`run_due`)
+
+1. **Arrêt d'urgence ou état illisible :** rien ne part, tâches programmées comprises. C'est vérifié avant le tour
+   et **avant chaque tâche** : un arrêt déclenché par la première tâche d'une file retient les suivantes.
+2. **Reprise des interrompues** (`recover`, au démarrage puis à chaque tour) et expiration (`expires_at` dépassée :
+   `expired`).
+3. **Réservation atomique :** `UPDATE … WHERE state = 'pending' AND attempts = <lu>`, avec un bail daté (`timeout` du
+   type). Deux fils ou deux processus sur la même base ne l'exécutent jamais tous les deux. Une copie périmée ne
+   réserve plus rien.
+4. **Décision du moteur central au moment de l'exécution :**
+   - les autorisations sont relues, donc rien n'hérite d'une autorisation expirée ou révoquée depuis la création ;
+   - une tâche liée à une autorisation (`grant_id`) échoue si celle-ci n'est plus valide, même si une autre la
+     couvrirait ;
+   - `allow` : exécution sous le principal de la tâche ;
+   - `ask` : demande de confirmation liée, tâche `held` ;
+   - retenue par l'état : retour en attente sans perdre d'essai ;
+   - autre refus : `failed`.
+5. **Résultat :**
+   - succès : `done`, ou occurrence suivante pour une tâche périodique, sans rattrapage en rafale après un arrêt ;
+   - échec : nouvel essai, avec une attente doublée à chaque fois (30 s, 1 min, 2 min…, plafonnée à 6 h), jusqu'à
+     `max_attempts`, puis `failed`.
+6. **Annulation pendant l'exécution :** elle l'emporte. Le résultat est ignoré et inscrit comme tel.
+
+**Interruption brutale :** une tâche `running` dont le bail est échu a été interrompue (processus tué, coupure).
+- Type déclaré **idempotent** : elle repart, et l'essai compte.
+- Sinon : `interrupted`, **jamais relancée d'elle-même**, car l'action a pu avoir lieu. Vous la relancez (`retry`)
+  ou l'annulez depuis ORION Control.
+- Pour rendre idempotente une action extérieure, le code reçoit une clé unique par exécution (`TaskRun.run_key`).
+
+**Doublons à la création :** une clé `key` (identifiant de la demande) rend une création répétée sans effet, par
+exemple après un double clic ou un nouvel essai réseau.
+
+**Traçabilité :**
+- au registre d'actions : création (`task.create`), retenue (`task.hold`, une ligne par changement et non par tour),
+  décision (`task:<type>`), reprise (`task.recover`), échec (`task.fail`), expiration (`task.expire`), annulation
+  (`task.cancel`), relance (`task.retry`), résultat (`task.result`) ;
+- une ligne par exécution dans `task_runs` (début, fin, issue, erreur) ;
+- aucune valeur de paramètre : les noms seulement, et les résultats passent par `loggable`.
+
+## Confirmation liée à une demande
+
+`ConfirmationStore` :
+- **Contenu :** une demande porte un identifiant, le principal qui agira, l'action, l'empreinte SHA-256 des
+  paramètres, une échéance et un usage unique.
+- **Cycle :**
+  - `request` (le moteur ou le service de tâches) ;
+  - `approve` : la voix, la conversation ou ORION Control ; un module ne le peut jamais, car il n'a pas accès au
+    magasin ;
+  - `consume` au moment d'agir : une seule mise à jour conditionnelle ; tout doit correspondre, la demande ne doit être
+    ni expirée, ni refusée, ni déjà utilisée.
+- **Moteur :** `decide(…, confirmation=<id>)` ne consomme la demande que si l'action est sensible et qu'aucune
+  autorisation ne la couvre.
+- **Tâche périodique :** chaque occurrence sensible demande une nouvelle confirmation.
+
+ORION Control → Autonomie → « Confirmations en attente » (« Accorder une fois », « Refuser » ou « Retirer ») et
+« Tâches » (« Confirmer », « Relancer », « Annuler »). Routes : `GET /api/tasks[/<id>]`,
+`POST /api/tasks/<id>/cancel|retry|confirm`, `GET /api/confirmations`, `POST /api/confirmations/<id>/approve|refuse`.
+
+## Annonces vocales et veille (corrections de F1)
+
+`NotificationManager.permit` (posé seulement si `[platform]` est activé) soumet chaque annonce (`NOTIFY`) :
+
+| Source | Principal | Suspendue | Arrêt d'urgence |
+|---|---|---|---|
+| `reminder`, `timer` | `delegated:reminder`, `delegated:timer` | dite | retenue |
+| `calendar`, `routines`, `flex` | `delegated:calendar`, `delegated:routine`, `delegated:flex` | dite | retenue |
+| `mail` (nouveaux mails, annonce réglée par vous) | `delegated:mail` | dite | retenue |
+| `mail` « Échéance » (trouvée dans un mail) | `module:mail` (posé par le code d'ORION) | retenue | retenue |
+| `alerts` (modules V3) | déjà décidée par le routeur d'alertes | — | — |
+| autre | `module:<source>` | retenue | retenue |
+
+- **Principal déclaré :** un principal posé dans les métadonnées n'est accepté que s'il est `module:` ou
+  `delegated:`, jamais `user` ni `admin`.
+- **File vocale :** le canal revérifie chaque annonce juste avant de la dire. Un arrêt d'urgence survenu entre-temps
+  la retire (« l'arrêt d'urgence passe avant la file »).
+- **Veille (`EveWatch`, « appelle-moi la veille ») :** principal `delegated:eve`, capacité `NOTIFY`. Refusée, elle est
+  gardée et publiée au premier passage après la reprise, tant que l'élément n'est pas arrivé.
+
+## Registre : limites du chaînage SHA-256 et évolution vers la signature
+
+**Ce que le chaînage détecte :**
+- une ligne modifiée, insérée ou supprimée au milieu, par quelqu'un qui ne recalcule pas la chaîne ;
+- toute modification par l'application, puisque la classe n'expose ni modification ni suppression et que les
+  déclencheurs refusent `UPDATE` et `DELETE`.
+
+**Ce qu'il ne détecte pas** (un test le démontre : `test_hash_chain_alone_cannot_detect_a_full_rewrite_but_a_signature_does`) :
+1. **Réécriture complète :** quelqu'un qui peut écrire dans `orion_ops.db` peut retirer les déclencheurs, modifier
+   une ligne et recalculer tous les résumés. La chaîne reste alors cohérente, parce que SHA-256 n'a pas de secret.
+2. **Troncature de la fin :** supprimer les dernières lignes laisse une chaîne valide. Seule la comparaison avec une
+   empreinte de tête notée ailleurs la révèle.
+3. **Remplacement du fichier** par une copie plus ancienne, cohérente : même effet.
+4. **Horodatage :** c'est l'horloge locale ; il ne prouve pas la date.
+5. **Portée :** la chaîne prouve ce qui a été inscrit, pas ce qui ne l'a pas été. Une action faite hors du moteur
+   n'y figure pas ; c'est le rôle des tests de garde.
+6. **Contenu :** décisions et noms seulement, sans valeur de paramètre ; le registre ne permet pas de rejouer une
+   action.
+
+**Préparé en F2 (inactif) :**
+- **Migration 2 :** colonnes `key_id` et `signature`. Elles restent vides sans clé, et les lignes existantes ne sont
+  pas touchées.
+- **`Keyring` :** clés HMAC-SHA-256 de 32 octets au moins, `{identifiant: clé}` plus la clé courante. Sa
+  représentation (`repr`) ne montre aucune clé.
+- **Ce que signe `ActionLedger(…, keyring=…)` :** le résumé de chaque ligne.
+- **Ce que `verify` refuse :**
+  - une signature fausse ;
+  - une clé inconnue ;
+  - une ligne non signée après la première ligne signée (retour en arrière).
+- **Lignes anciennes :** celles écrites avant la signature restent acceptées.
+- **Rotation :** les anciennes clés restent dans le trousseau pour vérifier leurs lignes, et seule la clé courante
+  signe.
+
+**À faire dans le lot chiffrement (F4), sans création de clé réelle avant votre accord :**
+1. Clé fournie par un identifiant systemd chiffré (`LoadCredentialEncrypted`), hors de la base et du dépôt, jamais
+   écrite dans les journaux. Copie dans le gestionnaire de mots de passe et copie hors ligne, comme décidé pour la clé
+   de données. Ce sera de préférence une clé distincte de celle des données.
+2. Ligne de scellement à l'activation : première ligne signée, qui reprend l'empreinte de tête non signée, donc toute
+   la chaîne antérieure.
+3. Ancrage externe périodique de l'empreinte de tête (message écrit, fichier sur une autre machine), contre la
+   troncature et le remplacement du fichier.
+4. Procédure de rotation et de restauration, testée avant tout usage avec des données réelles.
+5. Limite qui restera : la clé HMAC vit dans le processus d'ORION. Quelqu'un qui contrôle ce processus peut signer.
+   Une signature asymétrique, avec une clé hors de la machine ou un ancrage externe, est la seule parade complète.
+   À arbitrer en F4.
+
+## Tests (F2)
+
+`tests/test_platform_tasks.py`, 31 tests sur des données factices :
+
+| Exigence | Test |
+|---|---|
+| Redémarrage avec des tâches en attente | `test_pending_tasks_survive_a_restart_and_run_once` |
+| Interruption pendant l'exécution | `test_interrupted_non_idempotent_task_is_never_rerun_by_itself`, `test_interrupted_idempotent_task_resumes_after_its_lease` |
+| Double exécution | `test_two_processes_never_run_the_same_task_twice` (deux processus, deux connexions, en même temps), `test_a_stale_claim_cannot_be_reused`, `test_creation_is_deduplicated_by_key` |
+| Révocation pendant l'attente | `test_revoking_a_grant_while_the_task_waits_blocks_it`, `test_an_expired_grant_is_never_inherited` |
+| Arrêt d'urgence pendant une file | `test_emergency_stop_during_a_queue_stops_the_rest_and_resumption_goes_through_suspended`, `test_emergency_stop_takes_priority_over_the_voice_queue` |
+| Reprise après retour à SUSPENDED | même test (puis l'initiative attend `active`), `test_eve_watch_is_held_on_emergency_stop_and_published_after_resumption` |
+| Bulletin NEWS programmé pendant la suspension | `test_a_scheduled_news_bulletin_runs_while_suspended_but_a_spontaneous_alert_is_refused` (vrai moteur NEWS, flux simulés), `test_a_one_off_bulletin_you_schedule_is_a_persistent_task_that_runs_while_suspended` |
+| Initiative spontanée de NEWS refusée | même test (alerte « bloquée », registre `module:news` `deny`) |
+| Expirées et échouées | `test_expired_and_failed_tasks_are_handled_and_traced` |
+| Confirmation liée | `test_confirmation_is_single_use_bound_to_principal_action_params_and_expiry`, `test_held_task_runs_once_with_a_confirmation_bound_to_it` |
+| Distinction des origines | `test_user_tasks_and_module_initiatives_are_distinct_and_cannot_be_forged`, `test_suspension_holds_module_initiatives_without_consuming_attempts` |
+| Annonces vocales | `test_reminders_and_mail_announcements_go_through_the_engine`, `test_without_the_foundation_notifications_are_unchanged` |
+| Registre | `test_hash_chain_alone_cannot_detect_a_full_rewrite_but_a_signature_does`, `test_signature_rotation_unknown_keys_and_unsigned_rows`, `test_ledger_v1_database_is_migrated_without_touching_existing_rows` |
+
+## Écarts par rapport à la demande, et risques résiduels (F2)
+
+1. **Les tâches existantes ne sont pas migrées dans `TaskService` :**
+   - rappels et minuteurs V2 : base JSON de V2, production intouchée ;
+   - routines ;
+   - tâches périodiques des modules : recréées au démarrage, comme avant.
+
+   `TaskService` est l'infrastructure. Il porte aujourd'hui les bulletins NEWS ponctuels (`news.bulletin`). Les
+   tâches périodiques des modules sont classées et retenues par le planificateur, mais ne sont pas persistées une à
+   une. Leur migration est proposée en F3, avec les événements normalisés.
+2. **Annonce refusée pendant l'arrêt d'urgence :** un rappel qui sonne pendant l'arrêt n'est pas dit plus tard. Il
+   est inscrit au registre (`deny`) et dans le journal d'activité (`notification.failed`). Seule la veille
+   (`EveWatch`) est gardée pour la reprise. À arbitrer : rejouer les rappels manqués à la reprise, ou non.
+3. **Annonce des nouveaux mails classée `delegated:mail` :** elle continue pendant la suspension, parce que vous
+   l'avez réglée (`[mail] announce`). Seule l'échéance trouvée dans un mail est une initiative. Si vous préférez la
+   suspendre aussi, c'est une ligne (`SOURCE_PRINCIPALS`).
+4. **Une tâche en cours n'est pas interrompue** par l'arrêt d'urgence. Python ne permet pas de tuer un fil
+   proprement. L'arrêt retient tout ce qui n'a pas commencé et toute action suivante, chaque action étant revérifiée.
+   Une tâche longue doit donc découper son travail en actions soumises au moteur.
+5. **Durée du bail :** une tâche plus longue que le `timeout` de son type serait jugée interrompue par un autre
+   processus. Un seul processus ORION utilise la base aujourd'hui. Il faudra un renouvellement du bail si plusieurs
+   processus partagent un jour les tâches.
+6. **Classification par contexte :** pendant `news:bulletins`, une alerte de NEWS qui ne serait pas un bulletin
+   partirait elle aussi sous `delegated:news:bulletins`. C'est le code de NEWS qui décide de ce qu'il émet dans cette
+   tâche, et aujourd'hui il n'y émet que le bulletin. La correction propre (`origin=` sur l'alerte du bulletin, une
+   ligne dans NEWS) attend votre coordination avec NEWS.
+7. **`confirmed=True` (F1) reste accepté** pour les chemins utilisateur existants (achat confirmé, EVOLVE depuis ORION
+   Control). Le passage de ces chemins à des confirmations liées est prévu en F3.
+8. **Signature du registre :** préparée et testée avec une clé factice, mais inactive. Aucune clé réelle n'a été
+   créée.

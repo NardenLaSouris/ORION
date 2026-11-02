@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from orion.platform.alerts import AlertRouter, AlertSettings
+from orion.platform.permissions import Capability
 from orion.platform.history import History
 from orion.platform.intelligence import StructuredLLM
 from orion.platform.modules import BaseModule, ModuleRegistry
@@ -73,6 +74,27 @@ class NotificationsModule(BaseModule):
         return 404, {"status": "error", "error": "not_found"}
 
 
+# Classification des tâches périodiques des modules (CORE FOUNDATION F2), faite par la plateforme et non par les
+# modules : (principal, capacité). Ce que vous avez programmé ou réglé part sous « delegated:… » et continue pendant
+# la suspension ; une initiative de module sous « module:… ».
+#   - news:bulletins : bulletins aux heures que vous avez réglées -> tâche programmée (NOTIFY) ;
+#   - news:collect : collecte des flux (lecture) ; les alertes spontanées qui en sortent restent « module:news » ;
+#   - watch:<id> : surveillance que vous avez créée ;
+#   - evolve:scan : analyse des journaux, initiative d'EVOLVE (lecture).
+JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.value),
+               "news:collect": ("module:news", Capability.READ.value),
+               "evolve:scan": ("module:evolve", Capability.READ.value)}
+
+
+def classify_job(job_id: str) -> tuple[str, str]:
+    if job_id in JOB_CLASSES:
+        return JOB_CLASSES[job_id]
+    module, _, rest = job_id.partition(":")
+    if module == "watch" and rest:
+        return f"delegated:watch:{rest}", Capability.READ.value
+    return f"module:{module}", Capability.NOTIFY.value  # inconnue : initiative, la plus surveillée
+
+
 def _owner(cfg) -> str:
     from orion.factory import build_profiles
 
@@ -89,7 +111,9 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
     m = cfg.modules
     store = Store(m.database)
     permits = foundation.permissions if foundation is not None else None  # moteur central (CORE FOUNDATION)
-    scheduler = Scheduler(halted=(lambda: permits.suspended_for("delegated:scheduler")) if permits else None)
+    scheduler = Scheduler(halted=(lambda: permits.suspended_for("delegated:scheduler")) if permits else None,
+                          classify=classify_job if permits else None,
+                          blocked=permits.blocked if permits else None)
     history = History(store)
     owner = _owner(cfg)
     modules: V3Modules | None = None
@@ -134,6 +158,10 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                                 collect_minutes=n.collect_minutes))
         registry.register(news)
         tools += news_tools(news)
+        if foundation is not None:
+            # Bulletin que vous programmez à une heure précise (« fais-moi un bulletin à 18 h ») : tâche persistante.
+            foundation.tasks.register("news.bulletin", lambda run, engine=news: {"bulletin": engine.bulletin(
+                run.params.get("slot"), deliver=True)}, Capability.NOTIFY)
     if "watch" in wanted:
         from orion.watch import WatchEngine, WatchSettings
         from orion.watch.connectors import build_connectors

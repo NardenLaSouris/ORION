@@ -474,8 +474,8 @@
 
   function table(headers, rows, empty = "Rien pour l'instant.") {
     if (!rows.length) return el("div", { class: "empty" }, empty);
-    return el("table", {}, el("thead", {}, el("tr", {}, headers.map((h) => el("th", {}, h)))),
-      el("tbody", {}, rows.map((cells) => el("tr", {}, cells.map((c) => el("td", {}, c))))));
+    return el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, el("tr", {}, headers.map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows.map((cells) => el("tr", {}, cells.map((c) => el("td", {}, c)))))));
   }
 
   function cards(items) {
@@ -803,7 +803,7 @@
         "Aucune confirmation en attente."),
       el("h2", {}, "Tâches"),
       table(["Tâche", "Origine", "Capacité", "État", "Prochaine exécution", "Essais", "Dernier message", ""],
-        tasks.tasks.map((t) => [t.kind, `${t.origin === "utilisateur" ? "programmée par vous" : "initiative"} (${t.principal})`,
+        tasks.tasks.map((t) => [t.kind, el("span", { title: t.principal }, t.origin === "utilisateur" ? "programmée par vous" : "initiative"),
           t.capability, TASK_STATES[t.state] || t.state, stamp(t.run_at), `${t.attempts}/${t.max_attempts}`, t.last_error,
           el("div", { class: "row" },
             t.state === "held" ? button("Confirmer", () => taskAction(t, "confirm", "Tâche confirmée"), "primary") : "",

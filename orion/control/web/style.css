@@ -261,6 +261,10 @@ label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; 
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td { overflow-wrap: break-word; }
+td .btn { white-space: nowrap; }  /* boutons jamais coupés en plein mot */
+.table-wrap { max-width: 100%; overflow-x: auto; }  /* dernier recours : défilement dans le tableau seul */
+td .row { flex-wrap: wrap; }
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
 td.ok { color: var(--ok); }
 td.err { color: var(--err); }

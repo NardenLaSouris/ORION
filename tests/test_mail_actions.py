@@ -79,10 +79,20 @@ class World:
         self.provider = MemoryMailProvider([])
         self.box = MailBox(self.provider)
         self.timers = TimerManager(EventBus(), clock=lambda: self.now)
-        self.notes = []
+        self.notes, self.questions = [], []
         self.llm = AnalysisLLM(*answers)
         self.actions = MailActions(tmp_path / "mail_actions.json", self.box, self.llm, self.timers,
-                                   clock=lambda: self.now, notify=self.notes.append)
+                                   clock=lambda: self.now, notify=self.notes.append, ask=self._ask)
+
+    def _ask(self, text, follow_up):
+        self.notes.append(text)
+        self.questions.append(follow_up)
+
+    def accept(self, answer="oui"):
+        """Réponse à la dernière question, comme « oui » juste après l'annonce (suite proposée)."""
+        offer = self.questions[-1]
+        tools = {t.name: t for t in mail_action_tools(self.actions)}
+        return tools[offer["tool"]].execute({**offer["parameters"], "answer": answer})
 
     def receive(self, message):
         self.provider.messages.append(message)
@@ -98,11 +108,13 @@ BODY = "Bonjour, merci de nous répondre avant le 20 octobre. Cordialement."
 def test_reliable_deadline_creates_two_reminders_once_and_never_touches_the_mail(tmp_path):
     w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"))
     item = w.receive(mail(1, BODY))
-    assert item["state"] == SCHEDULED
+    assert item["state"] == DEADLINE and w.reminders() == []  # rien sans votre accord
+    assert w.notes[-1].startswith("J'ai identifié une échéance") and "Voulez-vous que je programme" in w.notes[-1]
+    assert w.accept()["reminders"] == 2 and item["state"] == SCHEDULED
     assert w.reminders() == [(datetime(2026, 10, 19, 18, 0), "j-1"), (datetime(2026, 10, 20, 16, 30), "h-1h30")]
-    assert "deux rappels" in w.notes[-1] and "J'ai identifié une échéance" in w.notes[-1]
+    assert len(w.notes) == 1  # l'outil dit déjà « 2 rappels » : pas de seconde annonce
     w.actions.process(mail(1, BODY))  # même mail analysé de nouveau : rien de plus
-    assert len(w.timers.reminders()) == 2 and len(w.llm.prompts) == 1
+    assert len(w.timers.reminders()) == 2 and len(w.llm.prompts) == 1 and len(w.notes) == 1
     assert w.provider.messages[0].unread and w.provider.sent == [] and w.provider.trashed == [] \
         and w.provider.archived == []
     linked = w.timers.reminders()[0]
@@ -112,9 +124,11 @@ def test_reliable_deadline_creates_two_reminders_once_and_never_touches_the_mail
 def test_close_deadline_keeps_only_relevant_reminders_or_catches_up(tmp_path):
     w = World(tmp_path, analysis("répondre sous 3 heures"), now=RECEIVED + timedelta(minutes=5))
     w.receive(mail(1, "Merci de répondre sous 3 heures."))
+    w.accept()
     assert [tag for _, tag in w.reminders()] == ["h-1h30"]
     w2 = World(tmp_path / "b", analysis("répondre sous 1 heure"), now=RECEIVED + timedelta(minutes=5))
     w2.receive(mail(2, "Merci de répondre sous 1 heure."))
+    w2.accept()
     assert [tag for _, tag in w2.reminders()] == ["rattrapage"]
     w3 = World(tmp_path / "c", analysis("merci de nous répondre avant le 20 octobre"), now=datetime(2026, 10, 21))
     assert w3.receive(mail(3, BODY))["state"] == ABANDONED and w3.reminders() == []
@@ -124,9 +138,12 @@ def test_new_message_in_the_thread_moves_reminders_but_keeps_a_user_postponement
     w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"),
               analysis("répondre avant le 22 octobre"))
     w.receive(mail(1, BODY))
+    w.accept()
     j1 = w.timers.keyed("mail:<m1@agence.fr>:j-1")
     w.timers.move_reminder(j1.id, datetime(2026, 10, 19, 20, 0), by_user=True)  # vous l'avez reporté
     item = w.receive(mail(2, "Finalement, merci de répondre avant le 22 octobre.", reply_to="<m1@agence.fr>"))
+    assert item["state"] == DEADLINE and "22/10" in w.notes[-1]  # nouvelle date : la question est reposée
+    w.accept()
     assert item["thread"] == "<m1@agence.fr>" and len(w.timers.reminders()) == 2
     assert w.timers.keyed("mail:<m1@agence.fr>:h-1h30").expires_at == datetime(2026, 10, 22, 16, 30)
     assert w.timers.keyed("mail:<m1@agence.fr>:j-1").expires_at == datetime(2026, 10, 19, 20, 0)
@@ -135,9 +152,9 @@ def test_new_message_in_the_thread_moves_reminders_but_keeps_a_user_postponement
 def test_estimated_deadline_is_confirmed_before_any_reminder(tmp_path):
     w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre", kind="implicite"))
     item = w.receive(mail(1, BODY))
-    assert item["state"] == DEADLINE and w.reminders() == [] and "confirmer" in w.notes[-1]
+    assert item["state"] == DEADLINE and w.reminders() == [] and "J'ai cru comprendre" in w.notes[-1]
     tools = {t.name: t for t in mail_action_tools(w.actions)}
-    tools["confirm_mail_deadline"].execute({"answer": "oui"})
+    tools["confirm_mail_deadline"].execute({"answer": "oui"})  # sans la suite : la seule échéance en attente
     assert len(w.reminders()) == 2
 
 
@@ -145,10 +162,12 @@ def test_replies_reevaluate_the_file(tmp_path):
     w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"),
               analysis("merci de nous répondre avant le 20 octobre", by_reply=False))
     w.receive(mail(1, BODY))
+    w.accept()
     w.actions.replied("<m1@agence.fr>")
     assert w.actions.items["<m1@agence.fr>"]["state"] == WAITING and w.reminders() == []
     assert w.actions.is_replied("<m1@agence.fr>") is True
     w.receive(mail(5, BODY, subject="Pièces justificatives", message_id="<p5@agence.fr>"))
+    w.accept()
     w.actions.replied("<p5@agence.fr>")
     item = w.actions.items["<p5@agence.fr>"]
     assert item["state"] == REPLIED and len(w.reminders()) == 2 and "réglé" in w.notes[-1]
@@ -198,6 +217,9 @@ def test_state_survives_a_restart(tmp_path):
     w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"))
     w.receive(mail(1, BODY))
     again = MailActions(tmp_path / "mail_actions.json", w.box, w.llm, w.timers, clock=lambda: w.now)
+    assert again.items["<m1@agence.fr>"]["question"] == "confirm_deadline"  # la question attend toujours
+    w.accept()
+    again = MailActions(tmp_path / "mail_actions.json", w.box, w.llm, w.timers, clock=lambda: w.now)
     assert again.items["<m1@agence.fr>"]["state"] == SCHEDULED
 
 
@@ -223,7 +245,58 @@ def test_watcher_publishes_arrivals_and_feeds_the_tracker(tmp_path):
 def test_core_finds_a_written_deadline_when_the_llm_quote_is_missing_or_inexact(tmp_path):
     w = World(tmp_path, analysis(""), analysis("répondre rapidement svp"))
     item = w.receive(mail(1, "Bonjour, merci de nous répondre avant le 20 octobre concernant votre dossier."))
-    assert item["deadline"]["at"] == "2026-10-20T18:00:00" and item["state"] == SCHEDULED
+    assert item["deadline"]["at"] == "2026-10-20T18:00:00" and item["state"] == DEADLINE
     other = w.receive(mail(2, "Pour information, l'agence sera fermée le 1er novembre.", subject="Fermeture",
                            message_id="<f2@agence.fr>"))
     assert "deadline" not in other  # date seulement mentionnée : jamais une échéance
+
+
+# --- Rappels d'échéance : jamais sans votre accord (2 novembre 2026) --------------------------------------------
+
+def test_deadline_question_carries_its_follow_up_and_no_never_creates_reminders(tmp_path):
+    w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"))
+    w.receive(mail(1, BODY))
+    assert w.questions[-1] == {"tool": "confirm_mail_deadline",
+                               "parameters": {"answer": "oui", "thread": "<m1@agence.fr>"}}
+    result = w.accept("non")
+    item = w.actions.items["<m1@agence.fr>"]
+    assert result["confirmed"] is False and w.reminders() == [] and "deadline" not in item and item["state"] == ACTION
+    tools = {t.name: t for t in mail_action_tools(w.actions)}
+    assert "aucun rappel" in tools["confirm_mail_deadline"].say(result)
+
+
+def test_same_deadline_is_asked_only_once(tmp_path):
+    w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"),
+              analysis("merci de nous répondre avant le 20 octobre"))
+    w.receive(mail(1, BODY))
+    w.receive(mail(2, "Pour rappel : " + BODY, reply_to="<m1@agence.fr>"))
+    assert len(w.questions) == 1 and w.reminders() == []
+
+
+def test_the_answer_goes_to_the_announced_file_even_with_several_waiting(tmp_path):
+    w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"),
+              analysis("merci de nous répondre avant le 20 octobre"))
+    w.receive(mail(1, BODY))
+    w.receive(mail(5, BODY, subject="Pièces justificatives", message_id="<p5@agence.fr>"))
+    w.accept()  # la dernière annonce : « Pièces justificatives »
+    assert w.actions.items["<p5@agence.fr>"]["state"] == SCHEDULED
+    assert w.actions.items["<m1@agence.fr>"]["state"] == DEADLINE
+
+
+def test_yes_right_after_the_announcement_programs_the_reminders(tmp_path):
+    from orion.notifications import Notification
+    from orion.notifications.voice import VoiceNotificationChannel
+    from test_tools import PlannerLLM, make_core, run_agent
+
+    w = World(tmp_path, analysis("merci de nous répondre avant le 20 octobre"))
+    w.receive(mail(1, BODY))
+    core = make_core()
+    for tool in mail_action_tools(w.actions):
+        core.registry.register(tool)
+    voice = VoiceNotificationChannel()
+    voice.send(Notification("Échéance", w.notes[-1], "mail", metadata={"follow_up": w.questions[-1]}))
+    llm = PlannerLLM()
+    spoken, events = run_agent(["Oui."], llm, core, notifications=voice)
+    assert ("wake", "Écoute après l\x27annonce") in events and ("routing", "tool:annonce") in events
+    assert llm.planned == [] and len(w.reminders()) == 2  # sans LLM, pour le bon dossier
+    assert spoken[-1] == "C\x27est noté, monsieur : 2 rappels pour « Dossier de location »."

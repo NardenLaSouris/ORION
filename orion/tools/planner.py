@@ -68,6 +68,8 @@ EXAMPLES = (
     ("Quels sont mes minuteurs ?", "list_timers", {}),
     ("Combien de temps reste-t-il ?", "list_timers", {}),
     ("Annule le rappel pour le linge", "cancel_reminder", {"message": "linge"}),
+    ("Supprime tous mes rappels", "cancel_all_reminders", {}),
+    ("Efface les rappels Revolut", "cancel_all_reminders", {"message": "Revolut"}),
     ("Quels rappels sont prévus ?", "list_reminders", {}),
     ("Réveille-moi à 7 heures", "create_alarm", {"time": "7 heures"}),
     ("Mets un réveil demain à 6 h 30", "create_alarm", {"time": "6 h 30"}),
@@ -382,6 +384,8 @@ DOMAIN_WORDS = {
     "create_reminder": ("rappel", "rappels", "rappelle", "rappeler", "rappelez", "rappelles", "penser", "pense",
                         "previens", "prevenir", "n oublie", "oublie pas", "souviens", "noter", "note"),
     # Règles d'appel : seulement quand l'utilisateur parle d'appel ou de règle.
+    # Tout supprimer : « tous », « toutes », « les rappels » (plusieurs), jamais un rappel seul.
+    "cancel_all_reminders": ("tous", "toutes", "les rappels", "mes rappels", "ces rappels"),
     "create_call_rule": ("appelle moi", "appelez moi", "previens moi", "ecris moi", "telephone moi"),
     "list_call_rules": ("regle", "regles"),
     "describe_call_rule": ("regle", "regles"),
@@ -418,7 +422,8 @@ LIGHT_WORDS = ("lumiere", "lumieres", "lampe", "lampes", "ampoule", "ampoules", 
 
 DEFERRED_WORDS = ("rappelle moi", "rappelez moi", "fais moi penser", "faites moi penser", "rappelle nous",
                   "reveille moi", "reveillez moi")
-DEFERRED_TOOLS = ("create_reminder", "cancel_reminder", "list_reminders", "create_alarm", "cancel_alarm",
+DEFERRED_TOOLS = ("create_reminder", "cancel_reminder", "cancel_all_reminders", "list_reminders", "create_alarm",
+                  "cancel_alarm",
                   "list_alarms", "list_events", "next_events", "search_events", "free_slots", "add_event", "add_period",
                   "recall")
 

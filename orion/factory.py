@@ -547,13 +547,16 @@ def build_mail_actions(cfg: Config, mailbox, watcher, llm, timers, notifications
     from orion.mail.watch import in_quiet_hours
     from orion.notifications import Notification
 
-    def notify(text: str) -> None:
-        """Dit tout de suite si vous êtes là et hors heures calmes ; sinon la liste « à traiter » le garde."""
+    def notify(text: str, follow_up: dict | None = None) -> None:
+        """Dit tout de suite si vous êtes là et hors heures calmes ; sinon la liste « à traiter » le garde. Une
+        question porte sa suite : « oui » juste après l'annonce suffit."""
         house = presence.engine.snapshot()["house"] if presence is not None else "unknown"
         if house != "empty" and not in_quiet_hours(datetime.now(), cfg.mail.quiet_start, cfg.mail.quiet_end):
-            notifications.notify(Notification("Échéance", text, "mail"))
+            notifications.notify(Notification("Échéance", text, "mail",
+                                              metadata={"follow_up": follow_up} if follow_up else {}))
 
-    actions = MailActions(Path(cfg.memory.path).parent / "mail_actions.json", mailbox, llm, timers, notify=notify)
+    actions = MailActions(Path(cfg.memory.path).parent / "mail_actions.json", mailbox, llm, timers, notify=notify,
+                          ask=notify)
     watcher.on_new = actions.received
     mailbox.on_replied = lambda message: actions.replied(thread_of(message))
     actions.start()

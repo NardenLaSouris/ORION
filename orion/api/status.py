@@ -127,7 +127,9 @@ class CoreStatus:
         return {"timers": [{"id": t.id, "remaining": spoken_remaining(t.remaining(now)), "ends_at": f"{t.expires_at:%H:%M}"}
                            for t in self._timers.timers()],
                 "reminders": [{"id": r.id, "message": r.message, "remaining": spoken_remaining(r.remaining(now)),
-                               "at": f"{r.expires_at:%H:%M}"} for r in self._timers.reminders()]}
+                               # Un autre jour : la date aussi (« 05/12 18:00 », pas seulement « 18:00 »).
+                               "at": f"{r.expires_at:%H:%M}" if r.expires_at.date() == now.date()
+                               else f"{r.expires_at:%d/%m %H:%M}"} for r in self._timers.reminders()]}
 
     def _routine_summary(self) -> dict:
         routines = self._routines.list() if self._routines is not None else []

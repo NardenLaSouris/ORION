@@ -556,3 +556,35 @@ max_utterance = 15.0
 # Détection de parole par énergie : seuil = max(min_rms, bruit_de_fond * ratio).
 min_rms = 300.0
 speech_to_noise_ratio = 3.0
+
+# --- ORION V3 (branche v3) : tout est inactif par défaut ; voir docs/v3/ -------------------------------------
+# Socle commun : base des modules et règles des alertes (présence, heures calmes, budget d'appels).
+[modules]
+database = "data/orion_v3.db"
+quiet_start = "22:30"
+quiet_end = "08:00"
+max_calls_per_day = 3            # appels spontanés, tous modules confondus
+min_call_interval_minutes = 15.0
+dedup_hours = 12.0
+critical_ignores_quiet = false   # true : une alerte critique peut appeler pendant les heures calmes
+
+# Surveillances (docs/v3/watch.md). Sources : [watch.sources.<nom>] type = "rss" | "offers_json", url, reliability.
+[watch]
+enabled = false
+default_interval_minutes = 60.0
+
+# Actualités (docs/v3/news.md). Flux : [news.feeds.<nom>] url, category, reliability.
+[news]
+enabled = false
+bulletin_times = ["08:00", "20:00"]
+
+# Maintenance et évolution du code (docs/v3/evolve.md) : niveau 1 observateur, 2 développeur ; 3 refusé.
+[evolve]
+enabled = false
+level = 1
+
+# Achats sous mandat (docs/v3/purchase.md) : bac à sable seulement, niveau 1 (confirmation) par défaut.
+[purchase]
+enabled = false
+level = 1
+sandbox = true

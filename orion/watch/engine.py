@@ -306,10 +306,9 @@ class WatchEngine(BaseModule):
             self._alert(watch, Alert("watch", finding.title, finding.message, Level(finding.level),
                                      key=f"{watch.id}:{finding.fingerprint}", details=finding.details))
             if self._events is not None:
-                self._events.publish(Event(WATCH_FOUND, "watch", {"watch_id": watch.id, "watch": watch.name,
-                                                                  "kind": watch.condition["kind"], "title": finding.title,
-                                                                  "url": finding.url, "source": finding.source,
-                                                                  **finding.details}))
+                payload = {"watch_id": watch.id, "watch": watch.name, "kind": watch.condition["kind"],
+                           "title": finding.title, "url": finding.url, "source": finding.source, **finding.details}
+                self._events.publish(Event(WATCH_FOUND, "watch", payload))
         if len(findings) > MAX_ALERTS_PER_CHECK:
             self._history.record("watch", watch.id, "regroupées", {"non_annoncées": len(findings)
                                                                    - MAX_ALERTS_PER_CHECK})
@@ -340,9 +339,12 @@ class WatchEngine(BaseModule):
         relevant = [o for o in offers if matches(product, o.title) is not None]
         if c.get("condition") == "new":
             relevant = [o for o in relevant if o.condition == "new"]
-        for offer in relevant:
-            self.prices.record(product, offer)
         market = market_price(relevant)
+        for offer in relevant:
+            # Historique : vendeurs fiables, prix plausibles (une offre suspecte fausserait le « plus bas observé »).
+            plausible = market is None or (offer.total is not None and offer.total >= market * 0.6)
+            if offer.seller_rating is not None and offer.seller_rating >= 0.8 and plausible:
+                self.prices.record(product, offer)
         stats = self.prices.stats(product)
         findings, summary = [], {"offres_vues": len(offers), "offres_du_produit": len(relevant),
                                  "prix_marché": market, "écartées": {}}

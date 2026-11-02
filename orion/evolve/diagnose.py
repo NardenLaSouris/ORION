@@ -87,7 +87,8 @@ def diagnose(anomaly: Anomaly, workspace: Workspace | None = None, llm: Structur
     module = files[0].split("/")[1] if files and "/" in files[0] else "?"
     diagnosis = Diagnosis(anomaly.signature, f"{anomaly.exception} levée dans {files[0] if files else '?'}"
                           + (f" ({anomaly.message})" if anomaly.message else ""),
-                          evidence=anomaly.samples + [f"{f['path']}:{f['line']} dans {f['function']}" for f in own[-3:]],
+                          evidence=anomaly.samples
+                          + [f"{f['path']}:{f['line']} dans {f['function']}" for f in own[-3:]],
                           files=files, dependencies=dependencies[:10],
                           consequences=f"la fonction en cause échoue (module {module}) ; {anomaly.count} occurrence(s)",
                           hypotheses=[HYPOTHESES.get(anomaly.exception, "à examiner dans le code")], code=code)

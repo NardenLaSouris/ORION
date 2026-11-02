@@ -14,7 +14,7 @@ from typing import Any
 from orion.platform.alerts import AlertRouter, AlertSettings
 from orion.platform.history import History
 from orion.platform.intelligence import StructuredLLM
-from orion.platform.modules import ModuleRegistry
+from orion.platform.modules import BaseModule, ModuleRegistry
 from orion.platform.scheduler import Scheduler
 from orion.platform.store import Store
 
@@ -51,6 +51,26 @@ class V3Modules:
     def stop(self) -> None:
         self.scheduler.stop()
         self.registry.stop()
+
+
+class NotificationsModule(BaseModule):
+    """Historique des alertes de tous les modules (ORION Control, section Notifications)."""
+
+    name, title = "notifications", "Notifications"
+
+    def __init__(self, alerts: AlertRouter):
+        self._alerts = alerts
+
+    def status(self) -> dict:
+        return self._alerts.status()
+
+    def admin(self, method: str, parts: list[str], query: dict, data: Any) -> tuple[int, Any]:
+        if method == "GET" and not parts:
+            return 200, self.status()
+        if method == "GET" and parts == ["history"]:
+            source = (query.get("source") or [None])[0]
+            return 200, self._alerts.history(200, source)
+        return 404, {"status": "error", "error": "not_found"}
 
 
 def _owner(cfg) -> str:
@@ -90,6 +110,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None) -
     structured = StructuredLLM(llm, available=lambda: not getattr(llm, "degraded", False)) if llm is not None \
         else None
     registry, tools = ModuleRegistry(), []
+    registry.register(NotificationsModule(alerts))  # historique commun des alertes (ORION Control)
     news = None
     if "news" in wanted:
         from orion.news import Feed, NewsEngine, NewsSettings

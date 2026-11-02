@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from orion.events import EventBus  # noqa: E402
-from orion.platform import AlertRouter, Scheduler, Store  # noqa: E402
+from orion.platform import Scheduler, Store  # noqa: E402
 from orion.platform.feeds import SourceError  # noqa: E402
 from orion.platform.intelligence import StructuredLLM  # noqa: E402
 from orion.watch import (  # noqa: E402
@@ -390,3 +390,17 @@ def test_voice_tools():
     assert tools["pause_watch"].run(position=1)["state"] == "en pause"
     assert tools["resume_watch"].run(position=1)["state"] == "active"
     assert tools["delete_watch"].run(position=1)["state"] == "supprimée"
+
+
+def test_suspicious_or_unrated_offers_never_enter_the_price_history():
+    w = World(MARKET + [offer("Vendeur X", 990.0, url="https://x.fr"), offer("Inconnu", 2300.0, rating=None,
+                                                                          url="https://i.fr")])
+    watch = w.price_watch()
+    w.engine.check(watch.id)
+    stats = w.engine.prices.stats("rtx 5090")
+    assert stats.count == 4 and stats.minimum == 2350.0  # ni l'offre à 990 €, ni le vendeur sans note
+
+
+def test_reasons_say_below_or_above_the_market():
+    assert "15 % sous le prix du marché (2410 €)" in evaluate(offer(price=2050.0), 2410.0, None).reasons[0]
+    assert "4 % au-dessus du prix du marché" in evaluate(offer(price=2500.0), 2410.0, None).reasons[0]

@@ -76,7 +76,8 @@ def watch_tools(engine: WatchEngine) -> list[Tool]:
         Tool("create_watch", "Crée une surveillance d'une information extérieure : prix ou bonne affaire d'un "
              "produit, retour en stock, événement de jeu (Pokémon GO), annonce officielle ou sortie.",
              {"request": request}, {"name": "surveillance", "position": "numéro"}, Risk.CONFIRMATION_REQUIRED, create,
-             question=question, say=lambda r: f"C'est noté, monsieur. Surveillance numéro {r['position']} : {r['name']}."),
+             question=question,
+             say=lambda r: f"C'est noté, monsieur. Surveillance numéro {r['position']} : {r['name']}."),
         Tool("list_watches", "Liste les surveillances et leur état.", {}, {"watches": "surveillances"}, Risk.SAFE,
              listing, say=listed),
         Tool("pause_watch", "Met une surveillance en pause.", {"position": position}, {"name": "surveillance"},

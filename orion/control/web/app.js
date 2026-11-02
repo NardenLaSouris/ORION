@@ -449,7 +449,246 @@
 
   // --- Navigation -----------------------------------------------------------------------------------
 
-  const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView };
+  // --- Modules V3 (WATCH, NEWS, EVOLVE, PURCHASE, notifications) ------------------------------------------
+  // Tout passe par /bridge/modules/<module>/… ; un module désactivé (ou absent du Core) affiche comment l'activer.
+
+  const mod = (name, path = "", method = "GET", body) => api(method, `/modules/${name}${path}`, body);
+  const stamp = (t) => (t ? new Date(t * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—");
+
+  function table(headers, rows, empty = "Rien pour l'instant.") {
+    if (!rows.length) return el("div", { class: "empty" }, empty);
+    return el("table", {}, el("thead", {}, el("tr", {}, headers.map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows.map((cells) => el("tr", {}, cells.map((c) => el("td", {}, c))))));
+  }
+
+  function cards(items) {
+    return el("div", { class: "grid" }, items.map(([label, value, note]) =>
+      el("div", { class: "card" }, el("div", { class: "muted small" }, label), el("div", { class: "big" }, String(value)),
+        note ? el("div", { class: "muted small" }, note) : null)));
+  }
+
+  function button(label, onclick, kind = "") {
+    return el("button", { class: `btn ${kind}`, onclick }, label);
+  }
+
+  async function moduleView(title, name, render) {
+    let entry;
+    try {
+      entry = (await api("GET", "/modules")).find((m) => m.name === name);
+    } catch (error) {
+      entry = { state: error.message };
+    }
+    if (!entry || entry.state !== "actif") {
+      const why = !entry ? "non activé" : entry.error ? `${entry.state} (${entry.error})` : entry.state;
+      view.replaceChildren(el("h1", {}, title), el("div", { class: "banner" }, `Module ${why}. Pour l'activer : `
+        + `[${name}] enabled = true dans la configuration du Core.`));
+      return;
+    }
+    await render(entry.details || {});
+  }
+
+  async function watchView() {
+    await moduleView("Surveillances", "watch", async (status) => {
+      const watches = await mod("watch", "", "GET");
+      const refresh = () => show("watch");
+      const request = el("input", { type: "text", placeholder: "« Surveille les RTX 5090 et préviens-moi d'une bonne affaire »", style: "flex:1" });
+      const act2 = (path, ok, method = "POST") => act(mod("watch", path, method), ok).then(refresh);
+      const detail = el("div", {});
+      async function open(id) {
+        const d = await mod("watch", `/${encodeURIComponent(id)}`);
+        detail.replaceChildren(el("h2", {}, d.name),
+          el("div", { class: "muted small" }, `Condition : ${JSON.stringify(d.condition)} · Sources : ${d.sources.join(", ")}`),
+          el("h3", {}, "Vérifications"),
+          table(["Heure", "Résultat", "Résumé", "Erreurs"], d.checks.map((c) => [stamp(c.at), c.ok ? "✓" : "✗",
+            JSON.stringify(c.summary), Object.entries(c.errors).map(([k, v]) => `${k} : ${v}`).join(" ; ") || "—"])),
+          el("h3", {}, "Déjà signalé"),
+          table(["Heure", "Titre", "Adresse"], d.found.map((f) => [stamp(f.at), f.title, f.url])),
+          el("h3", {}, "Historique"),
+          table(["Heure", "Événement", "Détail"], d.history.map((h) => [stamp(h.at), h.kind, JSON.stringify(h.detail)])));
+      }
+      view.replaceChildren(
+        el("h1", {}, "Surveillances"),
+        cards([["Surveillances", status.surveillances], ["Actives", status.actives], ["En échec", status.en_échec],
+          ["Sources configurées", status.sources]]),
+        el("div", { class: "toolbar" }, request, button("Créer", () => act(mod("watch", "", "POST", { request: request.value }),
+          "Surveillance créée.").then(refresh), "primary")),
+        table(["Nom", "État", "Dernière vérification", "Déclenchements", "Actions"], watches.map((w) => [
+          el("a", { href: "#", onclick: (e) => { e.preventDefault(); open(w.id); } }, w.name),
+          w.state + (w.last_error ? ` (${w.last_error})` : ""), stamp(w.last_check_at), String(w.triggers),
+          el("div", { class: "row" },
+            w.state === "PAUSED" || w.state === "FAILED"
+              ? button("Reprendre", () => act2(`/${w.id}/resume`, "Reprise."))
+              : ["ACTIVE", "TRIGGERED"].includes(w.state) ? button("Pause", () => act2(`/${w.id}/pause`, "En pause.")) : null,
+            ["ACTIVE", "TRIGGERED"].includes(w.state) ? button("Vérifier", () => act2(`/${w.id}/check`, "Vérifiée.")) : null,
+            button("Supprimer", () => confirm(`Supprimer « ${w.name} » ?`) && act2(`/${w.id}`, "Supprimée.", "DELETE"), "danger"))]),
+          "Aucune surveillance."),
+        detail);
+    });
+  }
+
+  async function newsView() {
+    await moduleView("Actualités", "news", async (status) => {
+      const [settings, stories, bulletins, alerts, sources] = await Promise.all([mod("news", "/settings"),
+        mod("news", "/stories"), mod("news", "/bulletins"), mod("news", "/alerts"), mod("news", "/sources")]);
+      const refresh = () => show("news");
+      const times = el("input", { type: "text", value: settings.bulletin_times.join(", ") });
+      const th = { ...settings.default_thresholds, ...settings.thresholds };
+      const thresholds = Object.fromEntries(Object.entries(th).map(([k, v]) => [k, el("input", { type: "number", min: 0, max: 100, value: v, style: "width:5em" })]));
+      const calls = el("input", { type: "number", min: 0, max: 10, value: settings.max_calls_per_day, style: "width:5em" });
+      const interval = el("input", { type: "number", min: 5, max: 1440, value: settings.min_call_interval_minutes, style: "width:6em" });
+      const alertsOn = el("input", { type: "checkbox", checked: settings.alerts_enabled });
+      const bulletinsOn = el("input", { type: "checkbox", checked: settings.bulletins_enabled });
+      const cats = Object.entries(settings.category_labels).map(([k, label]) =>
+        [k, el("input", { type: "checkbox", checked: settings.categories.includes(k) }), label]);
+      const save = () => act(mod("news", "/settings", "PUT", {
+        bulletin_times: times.value.split(",").map((t) => t.trim()).filter(Boolean),
+        thresholds: Object.fromEntries(Object.entries(thresholds).map(([k, i]) => [k, Number(i.value)])),
+        max_calls_per_day: Number(calls.value), min_call_interval_minutes: Number(interval.value),
+        alerts_enabled: alertsOn.checked, bulletins_enabled: bulletinsOn.checked,
+        categories: cats.filter(([, box]) => box.checked).map(([k]) => k),
+      }), "Réglages enregistrés.").then(refresh);
+      const latest = bulletins[0];
+      view.replaceChildren(
+        el("h1", {}, "Actualités"),
+        cards([["Sources", status.sources], ["Événements (48 h)", status["événements_48h"]],
+          ["Dernier bulletin", stamp(status.dernier_bulletin)], ["Appels (24 h)", status.appels_24h],
+          ["Synthèse LLM", status.llm ? "disponible" : "mode dégradé"]]),
+        el("div", { class: "toolbar" }, button("Collecter maintenant", () => act(mod("news", "/collect", "POST"), "Collecte faite.").then(refresh)),
+          button("Aperçu du bulletin", () => act(mod("news", "/bulletins", "POST"), "Aperçu composé (non envoyé).").then(refresh))),
+        el("h2", {}, "Réglages"),
+        el("div", { class: "list" },
+          el("label", { class: "row" }, "Heures des bulletins ", times),
+          el("div", { class: "row" }, "Seuils : ", Object.entries(thresholds).map(([k, i]) => el("label", {},
+            ` ${{ bulletin: "bulletin", priority: "prioritaire", alert: "alerte", priority_alert: "alerte prioritaire" }[k] || k} `, i))),
+          el("div", { class: "row" }, "Catégories : ", cats.map(([, box, label]) => el("label", {}, box, ` ${label} `))),
+          el("div", { class: "row" }, el("label", {}, "Appels par jour ", calls), el("label", {}, " · écart (min) ", interval),
+            el("label", {}, alertsOn, " alertes"), el("label", {}, bulletinsOn, " bulletins")),
+          button("Enregistrer", save, "primary")),
+        el("h2", {}, "Dernier bulletin"),
+        latest ? el("pre", { class: "small", style: "white-space:pre-wrap" }, latest.text) : el("div", { class: "empty" }, "Aucun bulletin."),
+        el("h2", {}, "Événements"),
+        table(["Titre", "Catégorie", "Statut", "Score", "Niveau", "Sources"], stories.map((s) =>
+          [s.title, s.category, s.status, String(s.score), s.tier, String(s.sources)])),
+        el("h2", {}, "Alertes"),
+        table(["Heure", "Titre", "Canaux", "Non envoyé"], alerts.map((a) => [stamp(a.at), a.title, a.channels.join(", ") || "—",
+          Object.entries(a.skipped).map(([k, v]) => `${k} : ${v}`).join(" ; ")])),
+        el("h2", {}, "Sources"),
+        table(["Nom", "Catégorie", "Fiabilité", "Dernière lecture", "État"], sources.map((s) => [s.name, s.category,
+          s.reliability, stamp(s.last_at), s.ok === 0 ? `✗ ${s.error}` : s.ok === 1 ? "✓" : "—"])));
+    });
+  }
+
+  async function evolveView() {
+    await moduleView("Évolution", "evolve", async (status) => {
+      const [anomalies, patches, proposals, history] = await Promise.all([mod("evolve", "/anomalies"),
+        mod("evolve", "/patches"), mod("evolve", "/proposals"), mod("evolve", "/history")]);
+      const refresh = () => show("evolve");
+      const detail = el("div", {});
+      async function diagnose(sig) {
+        const d = await act(mod("evolve", `/anomalies/${sig}`, "POST"));
+        if (!d) return;
+        detail.replaceChildren(el("h2", {}, "Diagnostic"), el("p", {}, d.summary),
+          el("div", { class: "small" }, `Fichiers : ${d.files.join(", ") || "—"} · Dépendances : ${d.dependencies.join(", ") || "—"}`),
+          el("div", { class: "small" }, `Hypothèses : ${d.hypotheses.join(" ; ")}`),
+          el("div", { class: "small" }, `Pistes : ${d.solutions.join(" ; ") || "—"} · Confiance : ${d.confidence} (${d.by})`),
+          el("pre", { class: "small", style: "white-space:pre-wrap" }, d.evidence.join("\n")));
+      }
+      view.replaceChildren(
+        el("h1", {}, "Évolution"),
+        cards([["Niveau", `${status.niveau} — ${status["niveau_libellé"]}`, status.remarque || "niveau 3 désactivé"],
+          ["Anomalies", status.anomalies], ["Propositions en attente", status.propositions_en_attente],
+          ["Correctifs", status.correctifs]]),
+        el("div", { class: "toolbar" },
+          button("Analyser le journal", () => act(mod("evolve", "/scan", "POST"), "Analyse faite.").then(refresh)),
+          button("Niveau 1 (observateur)", () => act(mod("evolve", "/level", "PUT", { level: 1 }), "Niveau 1.").then(refresh)),
+          button("Niveau 2 (développeur)", () => confirm("Autoriser EVOLVE à préparer des correctifs (branches, tests, commits) dans son espace isolé ?")
+            && act(mod("evolve", "/level", "PUT", { level: 2 }), "Niveau 2.").then(refresh))),
+        el("h2", {}, "Anomalies"),
+        table(["Type", "Titre", "Occurrences", "Dernière", "Actions"], anomalies.map((a) => [a.kind, a.title, String(a.count),
+          stamp(a.last_at), el("div", { class: "row" }, button("Diagnostic", () => diagnose(a.signature)),
+            a.kind === "logicielle" && status.niveau >= 2 ? button("Préparer un correctif", () => act(mod("evolve", "/patches", "POST", { origin: a.signature }),
+              "Correctif traité.").then(refresh)) : null)])),
+        detail,
+        el("h2", {}, "Correctifs"),
+        table(["Heure", "Origine", "Branche", "État", "Vérifications", "Pull Request"], patches.map((p) => [stamp(p.at), p.origin,
+          p.branch, p.state, (p.report.steps || []).map((s) => `${s["étape"]} ${s.ok ? "✓" : "✗"}`).join(" · ")
+            + ((p.report.problems || []).length ? ` — ${p.report.problems.join(" ; ")}` : ""), p.pr || "—"])),
+        el("h2", {}, "Propositions"),
+        table(["Titre", "Origine", "Difficulté", "Statut", "Détail", "Décision"], proposals.map((p) => [p.title, p.origin,
+          p.difficulty, p.status, `${p.description} Intérêt : ${p.interest} · Risques : ${p.risks} · Coût : ${p.cost}`,
+          p.status === "en attente" ? el("div", { class: "row" },
+            button("Accepter", () => act(mod("evolve", `/proposals/${p.id}/accept`, "POST"), "Acceptée.").then(refresh), "primary"),
+            button("Refuser", () => act(mod("evolve", `/proposals/${p.id}/reject`, "POST"), "Refusée.").then(refresh), "danger")) : "—"])),
+        el("h2", {}, "Historique"),
+        table(["Heure", "Événement", "Élément", "Détail"], history.slice(0, 50).map((h) => [stamp(h.at), h.kind, h.item,
+          JSON.stringify(h.detail)])));
+    });
+  }
+
+  async function purchaseView() {
+    await moduleView("Achats", "purchase", async (status) => {
+      const [mandates, orders, opportunities] = await Promise.all([mod("purchase", "/mandates"), mod("purchase", "/orders"),
+        mod("purchase", "/opportunities")]);
+      const refresh = () => show("purchase");
+      const f = { product: el("input", { type: "text", value: "RTX 5090" }), max_price: el("input", { type: "number", value: 2000 }),
+        max_shipping: el("input", { type: "number", value: 0 }), total_budget: el("input", { type: "number", value: 2000 }),
+        sellers: el("input", { type: "text", placeholder: "LDLC, Materiel.net" }), days: el("input", { type: "number", value: 30 }),
+        level: el("select", {}, [1, 2, 3].map((l) => el("option", { value: l }, `Niveau ${l}`))) };
+      const create = () => act(mod("purchase", "/mandates", "POST", {
+        product: f.product.value, max_price: Number(f.max_price.value), max_shipping: Number(f.max_shipping.value),
+        total_budget: Number(f.total_budget.value), sellers: f.sellers.value.split(",").map((s) => s.trim()).filter(Boolean),
+        expires_at: Date.now() / 1000 + Number(f.days.value) * 86400, level: Number(f.level.value),
+      }), "Mandat créé.").then(refresh);
+      const orderAction = (id, action, body) => act(mod("purchase", `/orders/${id}/${action}`, "POST", body), "Fait.").then(refresh);
+      view.replaceChildren(
+        el("h1", {}, "Achats"),
+        el("div", { class: "banner" }, "Bac à sable : aucun paiement ni aucune commande réels dans cette version."),
+        cards([["Niveau", status.niveau], ["Mandats actifs", status.mandats_actifs], ["Budget autorisé", `${status["budget_autorisé"]} €`],
+          ["Dépensé", `${status["dépensé"]} €`], ["En attente", status.en_attente],
+          ["Arrêt global", status["arrêt_global"] ? "ACTIF" : "non"]]),
+        el("div", { class: "toolbar" }, status["arrêt_global"]
+          ? button("Reprendre les achats", () => act(mod("purchase", "/resume", "POST"), "Achats repris.").then(refresh))
+          : button("Arrêt global des achats", () => act(mod("purchase", "/stop", "POST"), "Achats arrêtés.").then(refresh), "danger")),
+        el("h2", {}, "Nouveau mandat"),
+        el("div", { class: "row", style: "flex-wrap:wrap" }, Object.entries({ "Produit": f.product, "Prix max (€)": f.max_price,
+          "Livraison max (€)": f.max_shipping, "Budget total (€)": f.total_budget, "Vendeurs autorisés": f.sellers,
+          "Validité (jours)": f.days, "Niveau": f.level }).map(([label, input]) => el("label", {}, `${label} `, input)),
+          button("Créer le mandat", () => confirm("Créer ce mandat d'achat ?") && create(), "primary")),
+        el("h2", {}, "Mandats"),
+        table(["Produit", "Vendeurs", "Prix max", "Budget restant", "Achats", "Expire", "Niveau", "État", ""], mandates.map((m) => [
+          m.product, m.sellers.join(", "), `${m.max_price} € + ${m.max_shipping} €`, `${m.remaining} €`,
+          `${m.purchases}/${m.max_purchases}`, stamp(m.expires_at), String(m.level), m.state,
+          m.state === "ACTIVE" ? button("Révoquer", () => confirm("Révoquer ce mandat immédiatement ?")
+            && act(mod("purchase", `/mandates/${m.id}/revoke`, "POST"), "Mandat révoqué.").then(refresh), "danger") : "—"])),
+        el("h2", {}, "Commandes"),
+        table(["Créée", "Produit", "Vendeur", "Total", "État", "Raison", ""], orders.map((o) => [stamp(o.created_at), o.offer.titre,
+          o.offer.vendeur, `${o.total} €`, o.state, o.reason, el("div", { class: "row" },
+            o.state === "AWAITING_CONFIRMATION" ? button("Confirmer l'achat", () => confirm(`Commander pour ${o.total} € ?`)
+              && orderAction(o.id, "confirm"), "primary") : null,
+            o.state === "AWAITING_AUTH" ? button("Authentifié (bac à sable)", () => orderAction(o.id, "auth", { authenticated: true })) : null,
+            ["AWAITING_CONFIRMATION", "AWAITING_AUTH", "CONFIRMED"].includes(o.state) ? button("Annuler", () => orderAction(o.id, "cancel"), "danger") : null)])),
+        el("h2", {}, "Offres évaluées"),
+        table(["Heure", "Offre", "Vendeur", "Total", "Autorisée", "Bloquée par"], opportunities.slice(0, 50).map((o) => [stamp(o.at),
+          o.title, o.seller, o.total === null ? "inconnu" : `${o.total} €`, o.allowed ? "✓" : "✗",
+          o.checks.filter((c) => c.ok !== true).map((c) => `${c["critère"]}${c.ok === null ? " (inconnu)" : ""}`).join(", ") || "—"])));
+    });
+  }
+
+  async function notificationsView() {
+    await moduleView("Notifications", "notifications", async (status) => {
+      const history = await mod("notifications", "/history");
+      view.replaceChildren(
+        el("h1", {}, "Notifications"),
+        cards([["Présence", { home: "à la maison", away: "absent", unknown: "inconnue" }[status.presence] || status.presence],
+          ["Appels (24 h)", `${status.calls_last_24h} / ${status.max_calls_per_day}`], ["Heures calmes", status.quiet_hours]]),
+        table(["Heure", "Module", "Niveau", "Titre", "Message", "Canaux", "Non envoyé"], history.map((a) => [stamp(a.at), a.source,
+          a.level, a.title, a.message, a.channels.join(", ") || "—",
+          Object.entries(a.skipped).map(([k, v]) => `${k} : ${v}`).join(" ; ") || "—"]), "Aucune notification."));
+    });
+  }
+
+  const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
+    news: newsView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],
     ["visage", "Comme le visage d'ORION (sa couleur du moment)"], ["jarvis", "ORION (jour)"],

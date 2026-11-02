@@ -23,7 +23,8 @@ from orion.watch.products import plain
 RELIABILITY_RANK = {"blog": 1, "media": 2, "agency": 3, "official": 4}
 WEIGHTS = {"gravity": 30.0, "reach": 20.0, "consequences": 10.0, "evolution": 10.0}
 THRESHOLDS = {"bulletin": 30, "priority": 50, "alert": 70, "priority_alert": 85}
-ARCHIVE, BULLETIN, PRIORITY, ALERT, PRIORITY_ALERT = "archive", "bulletin", "prioritaire", "alerte", "alerte prioritaire"
+ARCHIVE, BULLETIN, PRIORITY = "archive", "bulletin", "prioritaire"
+ALERT, PRIORITY_ALERT = "alerte", "alerte prioritaire"
 
 GRAVE = ("guerre", "attaque", "attaques", "frappe", "frappes", "missile", "missiles", "explosion", "attentat",
          "seisme", "tremblement de terre", "tsunami", "morts", "tues", "victimes", "nucleaire", "invasion",

@@ -72,7 +72,7 @@ def test_watch_module_is_built_with_its_tools_and_alerts_are_connected(tmp_path)
         assert {t.name for t in v3.tools} >= {"create_watch", "list_watches", "delete_watch"}
         calls = Calls()
         v3.connect(calls)
-        assert [s["state"] for s in v3.registry.status()] == ["actif"]
+        assert {s["name"]: s["state"] for s in v3.registry.status()} == {"notifications": "actif", "watch": "actif"}
         v3.alerts.deliver(Alert("watch", "Test", "Message à la maison.", Level.HIGH, key="a"))
         assert notifications.sent == ["Message à la maison."]
         presence.home = False
@@ -103,7 +103,7 @@ def test_news_and_watch_together_share_the_news_source(tmp_path):
     try:
         assert {"news_bulletin", "create_watch"} <= {t.name for t in v3.tools}
         assert v3.registry.get("watch").connectors.names() == ["news"]
-        assert v3.registry.order() == ["news", "watch"]
+        assert v3.registry.order() == ["notifications", "news", "watch"]
     finally:
         v3.stop()
 
@@ -123,9 +123,22 @@ def test_purchase_needs_watch_and_never_a_real_payment(tmp_path):
                      notifications=Notifications())
     try:
         alone.connect(None)
-        assert {s["name"]: s["state"] for s in alone.registry.status()} == {"purchase": "non démarré"}
+        assert {s["name"]: s["state"] for s in alone.registry.status()} == {"notifications": "actif",
+                                                                            "purchase": "non démarré"}
         assert "stop_purchases" in {t.name for t in alone.tools}
     finally:
         alone.stop()
     with pytest.raises(ValueError, match="sandbox"):
         build_v3(config(tmp_path, purchase={"enabled": True, "sandbox": False}))
+
+
+def test_notifications_history_is_exposed(tmp_path):
+    v3 = build_v3(config(tmp_path, watch={"enabled": True}), presence=Presence(True), notifications=Notifications())
+    try:
+        v3.connect(Calls())
+        v3.alerts.deliver(Alert("watch", "Titre", "Message.", Level.NORMAL, key="z"))
+        status, history = v3.registry.admin("GET", ["notifications", "history"], {}, None)
+        assert status == 200 and history[0]["title"] == "Titre" and history[0]["channels"] == ["voix"]
+        assert v3.registry.admin("GET", ["notifications"], {}, None)[1]["presence"] == "home"
+    finally:
+        v3.stop()

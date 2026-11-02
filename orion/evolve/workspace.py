@@ -1,6 +1,7 @@
 """Espace de travail isolé d'EVOLVE : un clone du dépôt, jamais l'installation active.
 
-- Clone local (``git clone --no-hardlinks``) dans le dossier configuré, vérifié par la politique (orion/evolve/policy.py).
+- Clone local (``git clone --no-hardlinks``) dans le dossier configuré, vérifié par la politique
+  (orion/evolve/policy.py).
 - Une branche « evolve/<id> » par correctif, partie de la branche suivie ; jamais de travail sur une autre branche.
 - Modifications par remplacement exact (le texte cherché doit apparaître une seule fois), chemins vérifiés.
 - Vérifications avant tout commit : tests, compilation de tout le code, contrôle de sécurité du diff (lignes

@@ -14,7 +14,8 @@ from typing import Any
 
 from orion.platform.states import StateMachine
 
-ACTIVE, PAUSED, TRIGGERED, COMPLETED, EXPIRED, FAILED = "ACTIVE", "PAUSED", "TRIGGERED", "COMPLETED", "EXPIRED", "FAILED"
+ACTIVE, PAUSED, TRIGGERED = "ACTIVE", "PAUSED", "TRIGGERED"
+COMPLETED, EXPIRED, FAILED = "COMPLETED", "EXPIRED", "FAILED"
 STATES = StateMachine({
     ACTIVE: {PAUSED, TRIGGERED, EXPIRED, FAILED, COMPLETED},
     PAUSED: {ACTIVE, EXPIRED, COMPLETED},
@@ -79,7 +80,7 @@ def validate_condition(raw: Any) -> dict:
         out["max_price"] = _number(raw.get("max_price"), "prix maximum")
         out["min_score"] = _number(raw.get("min_score"), "score minimum", 0, 100)
         if kind == PRICE and out["max_price"] is None and out["min_score"] is None:
-            out["min_score"] = 70.0  # « bonne affaire » sans seuil : score d'opportunité, jamais « n'importe quel prix »
+            out["min_score"] = 70.0  # « bonne affaire » sans seuil : score d'opportunité, pas « n'importe quel prix »
         state = raw.get("condition", "new")
         if state not in ("new", "any"):
             raise WatchError("condition : état « new » ou « any »")

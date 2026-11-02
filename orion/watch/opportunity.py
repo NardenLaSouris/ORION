@@ -132,7 +132,8 @@ def evaluate(offer: Offer, market: float | None, history: PriceStats | None,
     else:
         gap = (market - total) / market
         parts["market"] = _clamp(gap / FULL_DISCOUNT)
-        reasons.append(f"{gap * 100:+.0f} % par rapport au marché ({market:.0f} €)".replace("+-", "-"))
+        reasons.append(f"{abs(gap) * 100:.0f} % {'sous' if gap >= 0 else 'au-dessus du'} le prix du marché "
+                       f"({market:.0f} €)".replace("au-dessus du le", "au-dessus du"))
         if gap > SUSPICIOUS_DISCOUNT:
             flags.append(f"prix {gap * 100:.0f} % sous le marché : anormalement bas")
 

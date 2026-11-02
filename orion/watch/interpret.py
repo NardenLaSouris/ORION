@@ -22,7 +22,7 @@ MAX_PRICE = re.compile(r"(?:moins de|sous|max(?:imum)?|en dessous de|<)\s*(\d[\d
 STOP = {"previens", "moi", "quand", "les", "des", "une", "un", "le", "la", "sur", "de", "du", "et", "a", "pour",
         "surveille", "surveiller", "dis", "lorsqu", "lorsque", "qu", "arrivent", "arrive", "il", "y", "aura",
         "nouveau", "nouvelle", "officielle", "officiel", "officielles", "annonces", "annonce", "sortie", "pokemon",
-        "go", "pogo", "previens-moi", "alerte", "moi", "en", "est", "sont", "d", "l", "s", "que", "tu", "me",
+        "go", "pogo", "previens-moi", "alerte", "en", "est", "sont", "d", "l", "s", "que", "tu", "me",
         "veux", "voudrais", "savoir", "signale", "dans", "jeu"}
 
 

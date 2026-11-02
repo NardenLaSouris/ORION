@@ -82,14 +82,48 @@ Sections ajoutées à `config.toml`, toutes inactives par défaut :
 
 ## Modules
 
-Décrits dans leurs propres documents, au fur et à mesure :
-- `watch.md` ;
-- `news.md` ;
-- `evolve.md` ;
-- `purchase.md`.
+| Module | Paquet | Document | Dépend de |
+|---|---|---|---|
+| Notifications | `orion/platform/build.py` | historique commun des alertes | — |
+| WATCH | `orion/watch/` | `watch.md` | — (source « news » si NEWS est actif) |
+| NEWS | `orion/news/` | `news.md` | — |
+| EVOLVE | `orion/evolve/` | `evolve.md` | — |
+| PURCHASE | `orion/purchase/` | `purchase.md` | WATCH (événement `watch.found`) |
 
-### Dépendances
+- **Construction :** `orion/platform/build.py`, appelé par `orion/factory.py`. Elle se fait en deux temps : les modules et
+  leurs outils vocaux d'abord, puis la connexion aux appels et messages Linphone et le démarrage.
+- **Aucun module activé :** rien n'est créé ; pas même la base de données.
+- **Erreur de configuration d'un module** (flux sans catégorie, `purchase.sandbox = false`…) : le démarrage s'arrête avec
+  un message qui nomme la clé.
 
-- `purchase` dépend de `watch`.
-- `news` alimente `watch` par une source « news ».
-- Aucun cycle : le registre les refuse.
+### Outils vocaux ajoutés
+
+Ils ne sont enregistrés que si leur module est actif, avec leurs règles et mots de domaine dans le planificateur :
+
+| Module | Outils |
+|---|---|
+| WATCH | `create_watch` (confirmation), `list_watches`, `pause_watch`, `resume_watch`, `delete_watch` (confirmation) |
+| NEWS | `news_bulletin` |
+| PURCHASE | `stop_purchases` seulement ; acheter ne se fait jamais à la voix |
+
+EVOLVE n'a aucun outil vocal.
+
+### ORION Control
+
+Nouvelles sections : Surveillances, Actualités, Évolution, Achats, Notifications.
+- **Données :** elles passent par `/bridge/modules/…`, relayé vers `/api/modules/…`. L'état de chaque module est lu dans le
+  registre (`GET /api/modules`).
+- **Module inactif :** la section l'indique et explique comment l'activer.
+- **Sécurité de l'affichage :** comme le reste de l'interface, le DOM est construit élément par élément et aucun texte du
+  Core n'est inséré comme HTML.
+- **Vérification :** elles ont été vérifiées dans le navigateur avec un Core de démonstration aux données fictives, en bac
+  à sable.
+
+### Compatibilité avec V2
+
+- **Comportement :** sans `enabled = true`, aucune différence.
+- **Tests :** les tests V2 passent tous (voir `etat_v3.md`).
+- **Changements touchant aussi V2, tous sans effet tant que V3 est inactif :**
+  - l'API décode désormais les segments d'URL ;
+  - l'origine d'appel « alert » est ajoutée ;
+  - de nouvelles consignes du planificateur n'apparaissent que si leurs outils existent.

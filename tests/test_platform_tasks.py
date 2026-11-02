@@ -27,7 +27,7 @@ from orion.platform.ledger import ActionLedger, Keyring, entry_hash  # noqa: E40
 from orion.platform.permissions import Capability, PermissionEngine  # noqa: E402
 from orion.platform.scheduler import Scheduler  # noqa: E402
 from orion.platform.tasks import (  # noqa: E402
-    CANCELLED, DONE, EXPIRED, FAILED, HELD, INTERRUPTED, MODULE, PENDING, RUNNING, USER, TaskError, TaskService,
+    CANCEL_PENDING, CANCELLED, DONE, EXPIRED, FAILED, HELD, INTERRUPTED, MODULE, PENDING, RUNNING, USER, TaskError, TaskService,
 )
 
 NOW = 1_800_000_000.0
@@ -210,16 +210,38 @@ def test_expired_and_failed_tasks_are_handled_and_traced():
     assert w.engine.ledger.verify().ok
 
 
-def test_cancellation_wins_over_a_running_task_result():
+def test_cancelling_a_running_task_stops_it_at_its_next_checkpoint():
+    w = world()
+    effects = []
+
+    def two_steps(run):
+        effects.append("premier")
+        w.tasks.cancel(run.task_id, by=CONTROL)
+        assert w.tasks.get(run.task_id).state == CANCEL_PENDING  # demandée, pas encore faite
+        run.checkpoint()
+        effects.append("second")  # jamais atteint
+
+    w.tasks.register("rappel.dire", two_steps, Capability.NOTIFY)
+    task = w.tasks.schedule_for_user("rappel.dire", {}, by=VOICE)
+    assert w.tasks.run_due() == [(task.id, CANCELLED)]
+    assert effects == ["premier"] and "point de contrôle" in w.tasks.get(task.id).last_error
+    assert f"task.stopped:{task.id}" in actions(w)
+
+
+def test_a_task_that_could_not_stop_is_reported_as_such():
     w = world()
 
-    def cancel_during(run):
+    def no_checkpoint(run):
         w.tasks.cancel(run.task_id, by=CONTROL)
+        assert [r["id"] for r in w.tasks.running()] == [run.task_id]  # elle tourne encore, et on le dit
+        return {"fait": True}
 
-    w.tasks.register("rappel.dire", cancel_during, Capability.NOTIFY)
+    w.tasks.register("rappel.dire", no_checkpoint, Capability.NOTIFY)
     task = w.tasks.schedule_for_user("rappel.dire", {}, by=VOICE)
     w.tasks.run_due()
-    assert w.tasks.get(task.id).state == CANCELLED
+    done = w.tasks.get(task.id)
+    assert done.state == DONE and "n'a pas pu s'interrompre" in done.last_error  # jamais présentée comme arrêtée
+    assert f"task.cancel_late:{task.id}" in actions(w)
 
 
 # --- Permissions au moment de l'exécution --------------------------------------------------------------------
@@ -711,3 +733,103 @@ def test_ledger_v1_database_is_migrated_without_touching_existing_rows(tmp_path)
     assert Store(path).version("ledger") == 2 and migrated.verify().ok
     migrated.append("user", "READ", "b", "allow")
     assert migrated.verify().count == 2
+
+
+# --- F3 : annulation coopérative, effets extérieurs, bail renouvelé -----------------------------------------
+
+def test_emergency_stop_during_a_running_task_is_reported_honestly_then_stops_it():
+    foundation = Foundation(Store())
+    started, release, steps = threading.Event(), threading.Event(), []
+
+    def long_task(run):
+        started.set()
+        release.wait(5)
+        run.checkpoint()  # l'arrêt d'urgence est vu ici
+        steps.append("après le point de contrôle")
+
+    foundation.tasks.register("maison.long", long_task, Capability.CONTROL_DEVICE)
+    task = foundation.tasks.schedule_for_user("maison.long", {}, by=VOICE)
+    worker = threading.Thread(target=foundation.tasks.run_due)
+    worker.start()
+    assert started.wait(5)
+    stop = {t.name: t for t in foundation.tools()}["emergency_stop"]
+    result = stop.run()
+    assert result["still_running"] == 1
+    assert "pas encore pu s'interrompre" in stop.say(result)  # jamais « tout est arrêté »
+    assert foundation.tasks.get(task.id).state == CANCEL_PENDING
+    release.set()
+    worker.join(5)
+    assert steps == [] and foundation.tasks.get(task.id).state == CANCELLED
+    assert foundation.tasks.running() == []
+    assert "Arrêt d'urgence enclenché" in stop.say(stop.run()) and "pas encore" not in stop.say(stop.run())
+
+
+def test_permission_is_checked_again_before_each_external_effect():
+    w = world()
+    activate(w.engine)
+    done = []
+
+    def pay(run):
+        run.effect(Capability.NOTIFY, action="paiement:prévenir")  # permis
+        done.append("prévenu")
+        run.effect(Capability.SPEND, {"amount": 40}, action="paiement:payer")  # sensible, non couvert
+        done.append("payé")
+
+    w.tasks.register("paiement.preparer", pay, Capability.WRITE_DATA)
+    task = w.tasks.schedule_for_user("paiement.preparer", {}, by=VOICE, max_attempts=1)
+    w.tasks.run_due()
+    assert done == ["prévenu"] and w.tasks.get(task.id).state == FAILED
+    assert "PermissionDenied" in w.tasks.get(task.id).last_error
+
+
+def test_effect_is_refused_after_an_emergency_stop_mid_task():
+    w = world()
+    done = []
+
+    def two_effects(run):
+        run.effect(Capability.NOTIFY)
+        done.append(1)
+        w.engine.autonomy.emergency_stop(VOICE)
+        run.effect(Capability.NOTIFY)
+        done.append(2)
+
+    w.tasks.register("rappel.dire", two_effects, Capability.NOTIFY)
+    task = w.tasks.schedule_for_user("rappel.dire", {}, by=VOICE)
+    w.tasks.run_due()
+    assert done == [1] and w.tasks.get(task.id).state == CANCELLED
+
+
+def test_heartbeat_keeps_a_long_task_from_being_taken_over(tmp_path):
+    clock = Clock()
+    a, b = world(tmp_path / "ops.db", clock, "a"), world(tmp_path / "ops.db", clock, "b")
+    seen = {}
+
+    def long_task(run):
+        clock.t += 5  # bien au-delà du bail initial (1 s)
+        time.sleep(1.0)  # le battement renouvelle le bail
+        seen["reprises"] = b.tasks.recover()
+        return {"ok": True}
+
+    a.tasks.register("maison.long", long_task, Capability.CONTROL_DEVICE, timeout=1)
+    b.tasks.register("maison.long", long_task, Capability.CONTROL_DEVICE, timeout=1)
+    task = a.tasks.schedule_for_user("maison.long", {}, by=VOICE)
+    assert a.tasks.run_due() == [(task.id, DONE)]
+    assert seen["reprises"] == []  # encore active : jamais reprise par l'autre processus
+
+
+def test_a_cancel_pending_task_of_a_dead_process_is_closed_as_unknown(tmp_path):
+    w = world(tmp_path / "ops.db", instance="mort")
+
+    def crash_after_cancel(run):
+        w.tasks.cancel(run.task_id, by=CONTROL)
+        raise Crash()
+
+    w.tasks.register("maison.long", crash_after_cancel, Capability.CONTROL_DEVICE, timeout=60)
+    task = w.tasks.schedule_for_user("maison.long", {}, by=VOICE)
+    with pytest.raises(Crash):
+        w.tasks.run_due()
+    again = world(tmp_path / "ops.db", Clock(NOW + 120), instance="vivant")
+    again.tasks.register("maison.long", note(again), Capability.CONTROL_DEVICE, timeout=60)
+    assert again.tasks.recover() == [task.id]
+    closed = again.tasks.get(task.id)
+    assert closed.state == CANCELLED and "résultat inconnu" in closed.last_error and again.ran == []

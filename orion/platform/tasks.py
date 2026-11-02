@@ -31,6 +31,15 @@ exécutées sous le contrôle du moteur central.
 a été interrompue. Type **idempotent** : elle repart (l'essai compte). Sinon : ``interrupted``, jamais relancée
 d'elle-même (l'action a pu avoir lieu) ; vous la relancez (``retry``) ou l'annulez.
 
+**Annulation coopérative et bail renouvelé** (F3) :
+- une tâche en cours ne peut pas être tuée proprement : ``cancel`` (ou l'arrêt d'urgence) la passe ``cancel_pending``
+  et le code de la tâche s'arrête à son prochain point de contrôle (``TaskRun.checkpoint``), qui lève
+  ``TaskCancelled`` ; ``TaskRun.effect`` revérifie en plus la permission juste avant chaque effet extérieur ;
+- une tâche qui se termine sans avoir rencontré de point de contrôle n'est jamais présentée comme arrêtée : le
+  registre et son état disent qu'elle n'a pas pu s'interrompre (``running()`` liste celles qui tournent encore) ;
+- pendant l'exécution, un fil renouvelle le bail (``timeout`` / 3) : une tâche longue encore active n'est jamais
+  reprise par un autre processus pour cause de bail échu ; seul un processus arrêté laisse son bail expirer.
+
 **Traçabilité** : création, réservation, décision, reprise, échec, expiration, annulation et résultat sont inscrits
 au registre d'actions (sans valeur de paramètre) ; chaque exécution a sa ligne dans ``task_runs``.
 """
@@ -42,11 +51,11 @@ import re
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from orion.platform.autonomy import CONTROL, VOICE
-from orion.platform.permissions import Capability, Decision, PermissionEngine
+from orion.platform.permissions import Capability, Decision, PermissionDenied, PermissionEngine
 from orion.platform.running import running_as
 from orion.platform.store import Migration, Store, dumps, loads
 
@@ -98,6 +107,8 @@ MIGRATIONS = (
 
 PENDING, RUNNING, HELD = "pending", "running", "held"
 DONE, FAILED, EXPIRED, CANCELLED, INTERRUPTED = "done", "failed", "expired", "cancelled", "interrupted"
+CANCEL_PENDING = "cancel_pending"  # annulation demandée pendant l'exécution, en attente d'un point de contrôle
+ACTIVE = (RUNNING, CANCEL_PENDING)
 FINAL = frozenset({DONE, FAILED, EXPIRED, CANCELLED, INTERRUPTED})
 USER, MODULE = "utilisateur", "module"
 USER_CREATORS = frozenset({"user", VOICE, CONTROL})
@@ -108,6 +119,10 @@ MAX_RESULT = 2000
 
 class TaskError(ValueError):
     pass
+
+
+class TaskCancelled(Exception):
+    """Levée au point de contrôle d'une tâche dont l'annulation est demandée (ou que l'autonomie interdit)."""
 
 
 @dataclass(frozen=True)
@@ -136,10 +151,72 @@ class TaskRun:
     params: dict
     run: int
     attempt: int
+    control: Any = field(default=None, compare=False, repr=False)
 
     @property
     def run_key(self) -> str:
         return f"{self.task_id}:{self.run}"
+
+    def checkpoint(self) -> None:
+        """Point de contrôle : renouvelle le bail ; lève ``TaskCancelled`` si l'annulation est demandée ou si l'état
+        d'autonomie interdit désormais la tâche (arrêt d'urgence)."""
+        if self.control is not None:
+            self.control.checkpoint()
+
+    def effect(self, capability: Capability | str, context: dict | None = None, *, action: str = ""):
+        """Avant chaque effet extérieur : point de contrôle, puis décision du moteur central pour ce principal
+        (``PermissionDenied`` si refusé). Rend le verdict."""
+        if self.control is None:
+            return None
+        return self.control.effect(capability, context, action)
+
+
+class _RunControl:
+    """Lien entre le code d'une tâche et le service pendant une exécution : points de contrôle et bail."""
+
+    def __init__(self, service: "TaskService", task: "Task", task_type: TaskType):
+        self._service, self.task, self._type = service, task, task_type
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def heartbeat(self) -> bool:
+        return self._service._renew(self.task.id, self._type.timeout)  # noqa: SLF001
+
+    def start(self) -> None:
+        every = max(0.2, self._type.timeout / 3)
+
+        def beat() -> None:
+            while not self._stop.wait(every):
+                try:
+                    self.heartbeat()
+                except Exception:  # noqa: BLE001 - base momentanément occupée : nouvel essai au battement suivant
+                    log.exception("Tâche %s : renouvellement du bail impossible", self.task.id)
+
+        self._thread = threading.Thread(target=beat, name=f"bail-{self.task.id}", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+
+    def checkpoint(self) -> None:
+        self.heartbeat()
+        current = self._service.get(self.task.id)
+        if current is not None and current.state == CANCEL_PENDING:
+            raise TaskCancelled(current.last_error or "annulation demandée")
+        if why := self._service._permissions.blocked(self.task.principal, self.task.capability):  # noqa: SLF001
+            if why != "autonomie suspendue":
+                raise TaskCancelled(why)
+
+    def effect(self, capability, context, action):
+        self.checkpoint()
+        verdict = self._service._permissions.decide(  # noqa: SLF001
+            self.task.principal, capability, context, action=action or f"task:{self.task.kind}:effet",
+            request_id=self.task.id)
+        if not verdict.allowed:
+            raise PermissionDenied(verdict)
+        return verdict
 
 
 @dataclass(frozen=True)
@@ -203,6 +280,7 @@ class TaskService:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._active: dict[str, _RunControl] = {}  # tâches exécutées en ce moment par ce processus
         store.migrate("tasks", MIGRATIONS)
 
     # --- Types de tâche (code de la plateforme, jamais des données) ------------------------------------------
@@ -334,14 +412,74 @@ class TaskService:
                 self._release(task, run_id, f"retenue : {why}")
                 return ""
             return self._finish(task, run_id, FAILED, f"refusée : {verdict.reason}")
+        control = _RunControl(self, task, task_type)
+        control.start()
+        self._active[task.id] = control
         try:
             with running_as(task.principal):
                 result = task_type.handler(TaskRun(task.id, task.kind, task.principal, dict(task.params), run,
-                                                   attempt))
+                                                   attempt, control))
+        except TaskCancelled as exc:
+            return self._stopped(task, run_id, str(exc))
         except Exception as exc:  # noqa: BLE001 - une tâche en échec ne bloque jamais les autres
             log.exception("Tâche %s (%s) en échec", task.id, task.kind)
+            if self._cancel_requested(task.id):
+                return self._stopped(task, run_id, f"annulation demandée ; arrêt sur erreur ({type(exc).__name__})")
             return self._failed(task, run_id, attempt, f"{type(exc).__name__}: {exc}"[:300])
+        finally:
+            control.stop()
+            self._active.pop(task.id, None)
+        if self._cancel_requested(task.id):
+            return self._finished_despite_cancel(task, run_id, result)
         return self._succeeded(task, run_id, result)
+
+    def _cancel_requested(self, task_id: str) -> bool:
+        current = self.get(task_id)
+        return current is not None and current.state == CANCEL_PENDING
+
+    def _stopped(self, task: Task, run_id: int, reason: str) -> str:
+        """Arrêtée à un point de contrôle : annulée, jamais relancée d'elle-même (son travail a pu commencer)."""
+        self._end_run(run_id, "arrêtée au point de contrôle", reason)
+        self._update(task.id, state=CANCELLED, lease_owner="", lease_until=None, confirmation="",
+                     last_error=f"arrêtée au point de contrôle : {reason}"[:300], guard=ACTIVE)
+        self._ledger.append(task.principal, "TASK", f"task.stopped:{task.id}", "allow",
+                            f"arrêtée au point de contrôle ({reason})"[:200])
+        return CANCELLED
+
+    def _finished_despite_cancel(self, task: Task, run_id: int, result: Any) -> str:
+        """Annulation demandée, mais la tâche s'est terminée sans point de contrôle : dit tel quel."""
+        short = _short(result)
+        why = "annulation demandée pendant l'exécution : la tâche n'a pas pu s'interrompre et s'est terminée"
+        self._end_run(run_id, "terminée malgré l'annulation", why)
+        state = CANCELLED if task.interval else DONE  # périodique : aucune occurrence suivante
+        self._update(task.id, state=state, lease_owner="", lease_until=None, confirmation="", last_error=why,
+                     runs=task.runs + 1, result=dumps(short), guard=ACTIVE)
+        self._ledger.append(task.principal, "TASK", f"task.cancel_late:{task.id}", "deny", why)
+        return state
+
+    def _renew(self, task_id: str, timeout: float) -> bool:
+        """Battement : prolonge le bail d'une tâche que ce processus exécute encore."""
+        with self._lock:
+            return self._store.write("UPDATE tasks SET lease_until = ? WHERE id = ? AND lease_owner = ? AND "
+                                     "state IN (?, ?)", (self._clock() + timeout, task_id, self.instance,
+                                                         *ACTIVE)) == 1
+
+    def running(self) -> list[dict]:
+        """Tâches en cours (dans tous les processus) : pour dire honnêtement ce qui tourne encore."""
+        return [{"id": t.id, "kind": t.kind, "principal": t.principal, "state": t.state,
+                 "here": t.id in self._active, "lease_until": t.lease_until} for t in self.list(ACTIVE)]
+
+    def request_stop_all(self, reason: str) -> list[dict]:
+        """Arrêt d'urgence : toute tâche en cours passe ``cancel_pending`` ; rend celles qui tournent encore."""
+        now = self._clock()
+        with self._lock:
+            self._store.write("UPDATE tasks SET state = ?, last_error = ?, updated_at = ? WHERE state = ?",
+                              (CANCEL_PENDING, reason[:200], now, RUNNING))
+        still = self.running()
+        if still:
+            self._ledger.append("système", "TASK", "task.stop_all", "allow",
+                                f"{len(still)} tâche(s) en cours : arrêt au prochain point de contrôle")
+        return still
 
     def _decide(self, task: Task, task_type: TaskType):
         from orion.platform.permissions import Verdict
@@ -428,15 +566,16 @@ class TaskService:
         self._store.write("UPDATE task_runs SET finished_at = ?, outcome = ?, error = ? WHERE id = ?",
                           (self._clock(), outcome, error[:300], run_id))
 
-    def _update(self, task_id: str, guard: str | None = None, **fields: Any) -> bool:
-        """Mise à jour ; avec ``guard``, seulement si la tâche est encore dans cet état et réservée par ce processus
-        (une annulation pendant l'exécution l'emporte sur le résultat)."""
+    def _update(self, task_id: str, guard: str | tuple | None = None, **fields: Any) -> bool:
+        """Mise à jour ; avec ``guard`` (état ou états), seulement si la tâche est encore dans cet état et réservée par
+        ce processus (une annulation pendant l'exécution l'emporte sur le résultat)."""
         fields["updated_at"] = self._clock()
         sql = "UPDATE tasks SET " + ", ".join(f"{name} = ?" for name in fields) + " WHERE id = ?"
         params = [*fields.values(), task_id]
         if guard:
-            sql += " AND state = ? AND lease_owner = ?"
-            params += [guard, self.instance]
+            states = (guard,) if isinstance(guard, str) else tuple(guard)
+            sql += f" AND state IN ({', '.join('?' for _ in states)}) AND lease_owner = ?"
+            params += [*states, self.instance]
         with self._lock:
             return self._store.write(sql, params) == 1
 
@@ -451,13 +590,22 @@ class TaskService:
         """Tâches interrompues (bail échu) : idempotentes relancées, les autres ``interrupted`` ; rend leurs ids."""
         now = self._clock() if now is None else now
         found = []
-        for row in self._store.query("SELECT * FROM tasks WHERE state = ? AND (lease_until IS NULL OR "
-                                     "lease_until < ?)", (RUNNING, now)):
+        for row in self._store.query("SELECT * FROM tasks WHERE state IN (?, ?) AND (lease_until IS NULL OR "
+                                     "lease_until < ?)", (*ACTIVE, now)):
             task = Task.from_row(row)
+            if task.id in self._active:
+                continue  # exécutée ici même : jamais reprise pendant qu'elle tourne
             task_type = self._types.get(task.kind)
             self._store.write("UPDATE task_runs SET finished_at = ?, outcome = 'interrompue' WHERE task_id = ? "
                               "AND finished_at IS NULL", (now, task.id))
-            if task_type is not None and task_type.idempotent and task.attempts < task.max_attempts:
+            if task.state == CANCEL_PENDING:
+                changed = self._store.write("UPDATE tasks SET state = ?, lease_owner = '', lease_until = NULL, "
+                                            "last_error = ?, updated_at = ? WHERE id = ? AND state = ? AND "
+                                            "lease_owner = ?", (CANCELLED, "processus arrêté pendant l'annulation : "
+                                                                "résultat inconnu", now, task.id, CANCEL_PENDING,
+                                                                task.lease_owner))
+                verdict = "annulation : processus arrêté, résultat inconnu"
+            elif task_type is not None and task_type.idempotent and task.attempts < task.max_attempts:
                 changed = self._store.write("UPDATE tasks SET state = ?, lease_owner = '', lease_until = NULL, "
                                             "last_error = ?, updated_at = ? WHERE id = ? AND state = ? AND "
                                             "lease_owner = ?", (PENDING, "interrompue ; reprise", now, task.id,
@@ -505,13 +653,24 @@ class TaskService:
         return self._cancel(task_id, by)
 
     def _cancel(self, task_id: str, by: str, principal: str | None = None) -> bool:
-        sql = ("UPDATE tasks SET state = ?, updated_at = ?, last_error = ? WHERE id = ? AND state IN (?, ?, ?)" +
-               (" AND principal = ?" if principal else ""))
-        params = [CANCELLED, self._clock(), f"annulée ({by})", task_id, PENDING, HELD, RUNNING]
-        changed = self._store.write(sql, params + ([principal] if principal else []))
+        """Pas encore commencée : annulée tout de suite. En cours : ``cancel_pending`` (arrêt au prochain point de
+        contrôle, jamais annoncé comme fait avant)."""
+        owner = " AND principal = ?" if principal else ""
+        extra = [principal] if principal else []
+        now = self._clock()
+        with self._lock:
+            changed = self._store.write(f"UPDATE tasks SET state = ?, updated_at = ?, last_error = ? WHERE id = ? AND "
+                                        f"state IN (?, ?){owner}",
+                                        [CANCELLED, now, f"annulée ({by})", task_id, PENDING, HELD, *extra])
+            pending = 0 if changed else self._store.write(
+                f"UPDATE tasks SET state = ?, updated_at = ?, last_error = ? WHERE id = ? AND state = ?{owner}",
+                [CANCEL_PENDING, now, f"annulation demandée ({by})", task_id, RUNNING, *extra])
         if changed:
             self._ledger.append(by, "TASK", f"task.cancel:{task_id}", "allow", "tâche annulée")
-        return bool(changed)
+        elif pending:
+            self._ledger.append(by, "TASK", f"task.cancel:{task_id}", "allow",
+                                "annulation demandée : en cours, arrêt au prochain point de contrôle")
+        return bool(changed or pending)
 
     def retry(self, task_id: str, *, by: str) -> bool:
         """Relance une tâche interrompue ou en échec : vous seul (le résultat d'une interruption est inconnu)."""

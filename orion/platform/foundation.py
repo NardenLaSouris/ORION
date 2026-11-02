@@ -67,6 +67,9 @@ class Foundation:
         self.autonomy = AutonomySwitch(store, self.ledger)
         self.permissions = PermissionEngine(store, ledger=self.ledger, autonomy=self.autonomy)
         self.tasks = TaskService(store, self.permissions)
+        # Arrêt d'urgence : les tâches en cours reçoivent l'ordre de s'arrêter à leur prochain point de contrôle.
+        self.autonomy.on_change(lambda before, after: self.tasks.request_stop_all("arrêt d'urgence")
+                                if after is AutonomyState.EMERGENCY_STOP else None)
 
     def start(self) -> None:
         """Tâches persistantes : reprise des tâches interrompues, puis fil d'exécution."""
@@ -87,10 +90,18 @@ class Foundation:
             return {"state": self.autonomy.suspend(VOICE, reason or "demandé à la voix").value}
 
         def stop(reason: str | None = None) -> dict:
-            return {"state": self.autonomy.emergency_stop(VOICE, reason or "demandé à la voix").value}
+            state = self.autonomy.emergency_stop(VOICE, reason or "demandé à la voix").value
+            return {"state": state, "still_running": len(self.tasks.running())}
 
         def say(result: dict) -> str:
             if result["state"] == AutonomyState.EMERGENCY_STOP.value:
+                still = result.get("still_running", 0)
+                if still:  # jamais dire « tout est arrêté » quand une opération continue réellement
+                    return (f"Arrêt d'urgence enclenché, monsieur : plus aucune nouvelle action autonome. Attention, "
+                            f"{still} tâche{'s' if still > 1 else ''} en cours n'{'ont' if still > 1 else 'a'} pas "
+                            f"encore pu s'interrompre ; {'elles s' if still > 1 else 'elle s'}'arrêter"
+                            f"{'ont' if still > 1 else 'a'} au prochain point de contrôle. Le détail est dans ORION "
+                            "Control.")
                 return ("Arrêt d'urgence enclenché, monsieur : plus aucune action autonome. Je reste à votre écoute ; "
                         "la reprise se fait depuis ORION Control.")
             return ("C'est fait, monsieur : mon autonomie est suspendue. Vos tâches programmées continuent ; "
@@ -140,7 +151,8 @@ class Foundation:
             return (200, {"status": "ok"}) if ok else (404, {"status": "error", "error": "not_found"})
         if route == ["tasks"] and method == "GET":
             states = tuple(s for s in ((query.get("state") or [""])[0] or "").split(",") if s)
-            return 200, {"tasks": [t.as_dict() for t in self.tasks.list(states or None)], **self.tasks.status()}
+            return 200, {"tasks": [t.as_dict() for t in self.tasks.list(states or None)], **self.tasks.status(),
+                         "running": self.tasks.running()}
         if len(route) == 2 and route[0] == "tasks" and method == "GET":
             task = self.tasks.get(route[1])
             if task is None:

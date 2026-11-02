@@ -792,7 +792,8 @@
           el("div", { class: "row" },
             t.state === "held" ? button("Confirmer", () => taskAction(t, "confirm", "Tâche confirmée"), "primary") : "",
             ["interrupted", "failed"].includes(t.state) ? button("Relancer", () => taskAction(t, "retry", "Tâche relancée")) : "",
-            ["pending", "held", "running"].includes(t.state) ? button("Annuler", () => taskAction(t, "cancel", "Tâche annulée"), "danger") : "")]),
+            ["pending", "held", "running"].includes(t.state) ? button("Annuler", () => taskAction(t, "cancel",
+              t.state === "running" ? "Arrêt demandé : la tâche s'arrêtera à son prochain point de contrôle" : "Tâche annulée"), "danger") : "")]),
         "Aucune tâche persistante."),
       el("p", { class: "muted small" }, "Une tâche interrompue en pleine exécution n'est jamais relancée seule : "
         + "son résultat est inconnu. Les autorisations sont relues à chaque exécution."),
@@ -801,7 +802,8 @@
         e.principal, e.capability, e.action, e.decision, e.reason]), "Registre vide."));
   }
 
-  const TASK_STATES = { pending: "en attente", running: "en cours", held: "à confirmer", done: "faite",
+  const TASK_STATES = { pending: "en attente", running: "en cours", cancel_pending: "arrêt demandé (en cours)",
+    held: "à confirmer", done: "faite",
     failed: "en échec", expired: "expirée", cancelled: "annulée", interrupted: "interrompue" };
 
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,

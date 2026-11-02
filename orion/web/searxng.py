@@ -63,10 +63,13 @@ class SearXNGProvider:
         self._client = client or httpx.Client()
         self._fetcher = fetcher or PageFetcher(timeout=timeout, max_bytes=max_page_bytes)
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search(self, query: str, time_range: str | None = None) -> list[SearchResult]:
+        """``time_range`` : « day », « week », « month » ou « year » (moteurs qui le permettent)."""
         if not query.strip():
             return []
         params = {"q": query, "format": "json", "language": self._language, "safesearch": 1}
+        if time_range in ("day", "week", "month", "year"):
+            params["time_range"] = time_range
         try:
             response = self._client.get(f"{self._base_url}/search", params=params, timeout=self._timeout)
         except httpx.TimeoutException as exc:

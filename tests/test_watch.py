@@ -351,7 +351,7 @@ def test_creation_refuses_unknown_or_unsuitable_sources():
     with pytest.raises(WatchError, match="ne fournit pas"):
         w.engine.create({"name": "x", "condition": {"kind": "price", "product": "rtx 5090"}, "sources": ["pogo"]})
     watch = w.engine.create({"request": "Préviens-moi quand les raids Rayquaza arrivent sur Pokémon GO"})
-    assert watch.sources == ("pogo",) and watch.interval_s == 3600
+    assert watch.sources == ("pogo",) and watch.interval_s == 15 * 60  # événement : 15 min (fréquence automatique)
 
 
 def test_written_only_channel_is_honoured():

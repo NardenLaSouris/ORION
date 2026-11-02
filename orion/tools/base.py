@@ -72,6 +72,7 @@ class Tool:
     run: Callable[..., dict]
     question: Callable[[dict], str] | None = None
     say: Callable[[dict], str] | None = None  # phrase de succès dite sans LLM
+    capability: str | None = None  # capacité pour le moteur central (CORE FOUNDATION) ; None : déduite du risque
 
     @property
     def requires_confirmation(self) -> bool:

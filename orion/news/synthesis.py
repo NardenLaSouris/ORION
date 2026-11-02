@@ -66,8 +66,26 @@ def summarize(story: Story, articles: list[Article], llm: StructuredLLM | None =
     answer = llm.ask(TASK, SCHEMA, blocks)
     if answer is None or not grounded(answer, articles):
         return base
-    return {**base, "summary": answer["summary"].strip(), "confirmed": answer["confirmed"],
-            "uncertain": answer["uncertain"], "by": "llm"}
+    summary = answer["summary"].strip()
+    confirmed = distinct(summary, answer["confirmed"])
+    return {**base, "summary": summary, "confirmed": confirmed,
+            "uncertain": distinct(" ".join([summary, *confirmed]), answer["uncertain"]), "by": "llm"}
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", text.lower()) if len(w) > 3}
+
+
+def distinct(summary: str, facts: list[str]) -> list[str]:
+    """Faits qui ne répètent pas le résumé (ni un fait déjà gardé) : au plus 60 % de mots en commun."""
+    kept, seen = [], [_words(summary)] if summary else []
+    for fact in facts:
+        words = _words(fact)
+        if words and any(len(words & other) >= 0.6 * len(words) for other in seen):
+            continue
+        kept.append(fact)
+        seen.append(words)
+    return kept
 
 
 def item_text(entry: dict, evolution: bool) -> str:

@@ -826,6 +826,34 @@ def build_calls(cfg: Config, source, sink, events: EventBus | None):
     return manager
 
 
+def build_bulletin_delivery(cfg: Config, v3, mailbox, speaker: dict):
+    """Bulletin NEWS mis en page, ouvert sur le PC (fond d'écran /bulletin) ou envoyé par mail ; None sans NEWS ou
+    sans fond d'écran (la page y est servie)."""
+    news = v3.registry.get("news") if v3 is not None else None
+    if news is None or not cfg.wallpaper.enabled:
+        return None
+    from urllib.parse import urlsplit
+
+    from orion.news.delivery import BulletinDelivery, lan_address
+    from orion.tools.core import DONE
+
+    peer = urlsplit(cfg.audio.remote).hostname if cfg.audio.remote else None
+
+    def open_on_pc(url: str) -> bool:
+        core = speaker["core"]
+        return core is not None and core.submit({"type": "tool_call", "tool": "open_url", "parameters": {"url": url}},
+                                                origin="routine").status == DONE
+
+    send = None
+    if mailbox is not None and cfg.mail.user:
+        def send(subject: str, text: str, html: str) -> bool:
+            mailbox.provider.send(cfg.mail.user, subject, text, html=html)  # à vous-même seulement
+            return True
+
+    return BulletinDelivery(news, lambda: f"http://{lan_address(peer)}:{cfg.wallpaper.port}/bulletin", open_on_pc,
+                            send, Path(cfg.memory.path).parent / "news_delivery.json")
+
+
 def build_wallpaper(cfg: Config, tools=None, inbox=None, user: str = "", **services):
     """Mode fond d'écran (port [wallpaper] port) : statistiques, commandes rapides ([wallpaper] actions) et
     conversation écrite ([wallpaper] chat) ; ORION continue sans s'il ne démarre pas."""
@@ -994,6 +1022,9 @@ def build_agent(
                   foundation=foundation)
     if v3 is not None and cfg.tools.enabled:
         extra += v3.tools
+    bulletin_delivery = build_bulletin_delivery(cfg, v3, mailbox, speaker)
+    if bulletin_delivery is not None and cfg.tools.enabled:
+        extra.append(bulletin_delivery.tool())  # « montre-moi le bulletin » ; étape de la routine réveil
     tools = build_tools(cfg, personality, events, timers, weather, devices,
                         light_tools_for(rooms, driver, cfg.lights.scenes, home), extra)
     if tools is not None and foundation is not None:
@@ -1105,6 +1136,12 @@ def build_agent(
         v3.connect(calls)  # alertes par appel et message Linphone, puis démarrage des modules
         if api is not None:
             api.modules = v3.registry
+    if bulletin_delivery is not None and cfg.audio.remote and hasattr(source, "on_status"):
+        from orion.call.notices import PcOnlineNotice
+
+        # PC rallumé après une vraie absence : le dernier bulletin envoyé s'ouvre s'il n'a pas encore été vu.
+        opener, before = PcOnlineNotice(lambda _text: bulletin_delivery.pc_started()), source.on_status
+        source.on_status = lambda ok: (before(ok) if before else None, opener.status(ok))
     if calls is not None and cfg.audio.remote and hasattr(source, "on_status"):
         from orion.call.notices import PcOnlineNotice
 
@@ -1137,11 +1174,14 @@ def build_agent(
             from orion.tools.devices import AgentClient
 
             wallpaper_agents = AgentClient(secret("ORION_AGENT_TOKEN", ENV_FILE), timeout=4.0)
-        build_wallpaper(cfg, llm=llm, stt=stt, devices=devices, presence=presence, weather=weather,
+        wallpaper = build_wallpaper(cfg, llm=llm, stt=stt, devices=devices, presence=presence, weather=weather,
                         calendar=calendar, timers=timers, rooms=rooms, driver=driver, spotify=spotify,
                         watcher=watcher, agents=wallpaper_agents,
                         tools=tools if cfg.wallpaper.actions else None, inbox=wallpaper_inbox,
                         user=next((u.id for u in build_profiles(cfg).users() if u.role == "owner"), ""))
+        news = v3.registry.get("news") if v3 is not None else None
+        if wallpaper is not None and news is not None:
+            wallpaper.pages["/bulletin"] = lambda: news.page()[1]  # bulletin mis en page, PC et Katana seulement
     if call_rules is not None and calls is not None and (timers is not None or calendar is not None):
         from orion.scheduling.eve import EveWatch
 

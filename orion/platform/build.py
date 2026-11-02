@@ -169,6 +169,13 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
 
         w = cfg.watch
         connectors = build_connectors(w.sources)
+        if cfg.web.enabled and cfg.web.provider == "searxng":
+            from orion.watch.web import WebSearchConnector
+            from orion.web.searxng import SearXNGProvider
+
+            # Source Web automatique (SearXNG local) : chaque surveillance d'articles ou d'événements y cherche.
+            connectors.register(WebSearchConnector(SearXNGProvider(cfg.web.base_url, cfg.web.language, 10,
+                                                                   cfg.web.timeout)))
         if news is not None:
             from orion.news import NewsConnector
 

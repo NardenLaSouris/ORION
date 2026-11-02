@@ -62,7 +62,10 @@ MIGRATIONS = (
             name TEXT PRIMARY KEY, last_at REAL, ok INTEGER, error TEXT, articles INTEGER NOT NULL DEFAULT 0
         )
     """),
+    # Sujets du bulletin, structurés pour la mise en page (orion/news/page.py).
+    Migration(2, "ALTER TABLE news_bulletins ADD COLUMN entries TEXT NOT NULL DEFAULT '[]'"),
 )
+PAGE_STALE = 6 * 3600  # bulletin plus ancien : un nouveau est composé (aperçu, jamais compté comme envoyé)
 
 
 @dataclass(frozen=True)
@@ -372,10 +375,18 @@ class NewsEngine(BaseModule):
                                  "ORDER BY score DESC", (since, floor))
         stories = [pl.Story.from_dict(loads(r["data"], {})) for r in rows]
         stories = [st for st in stories if st.category in s.categories and st.facts - st.bulletin_facts]
-        entries = []
+        entries, laid_out = [], []
         for story in stories[:MAX_BULLETIN_ITEMS]:
             evolution = bool(story.bulletin_facts)
-            entries.append((summarize(story, self._articles(story), self._llm), story.category, evolution))
+            articles = self._articles(story)
+            summary = summarize(story, articles, self._llm)
+            entries.append((summary, story.category, evolution))
+            links, domains = [], set()
+            for a in articles:
+                if a.domain not in domains and len(links) < 4:
+                    domains.add(a.domain)
+                    links.append({"source": a.source, "url": a.url})
+            laid_out.append({**summary, "category": story.category, "evolution": evolution, "links": links})
         slot = slot or datetime.fromtimestamp(now).strftime("%H:%M")
         text, short = compose(entries, slot, now)
         delivered: Any = "aperçu"
@@ -391,21 +402,35 @@ class NewsEngine(BaseModule):
                 story.communicated_facts |= story.facts
                 self._save(story)
         bulletin_id = self._store.write(
-            "INSERT INTO news_bulletins (at, slot, day, text, short, stories, delivered) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO news_bulletins (at, slot, day, text, short, stories, delivered, entries) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (now, slot, datetime.fromtimestamp(now).strftime("%Y-%m-%d") if deliver else "", text, short,
-             dumps([st.id for st in stories[:MAX_BULLETIN_ITEMS]]), dumps(delivered)))
+             dumps([st.id for st in stories[:MAX_BULLETIN_ITEMS]]), dumps(delivered), dumps(laid_out)))
         if deliver:
             self._history.record("news", str(bulletin_id), "bulletin", {"créneau": slot, "sujets": len(entries),
                                                                         "canaux": delivered})
         return bulletin_id
 
-    def latest_bulletin(self) -> dict | None:
-        row = self._store.one("SELECT * FROM news_bulletins ORDER BY at DESC, id DESC LIMIT 1")
+    def latest_bulletin(self, delivered_only: bool = False) -> dict | None:
+        """Dernier bulletin ; ``delivered_only`` : seulement ceux réellement envoyés (pas les aperçus)."""
+        where = " WHERE delivered != '\"aperçu\"'" if delivered_only else ""
+        row = self._store.one(f"SELECT * FROM news_bulletins{where} ORDER BY at DESC, id DESC LIMIT 1")
         return self._bulletin_row(row) if row else None
 
     @staticmethod
     def _bulletin_row(row: dict) -> dict:
-        return {**row, "stories": loads(row["stories"], []), "delivered": loads(row["delivered"], [])}
+        return {**row, "stories": loads(row["stories"], []), "delivered": loads(row["delivered"], []),
+                "entries": loads(row.get("entries"), [])}
+
+    def page(self, fresh: bool = True) -> tuple[dict, str]:
+        """Dernier bulletin mis en page (HTML) ; s'il date de plus de 6 h (ou n'existe pas), un aperçu est composé."""
+        from orion.news.page import render_html
+
+        latest = self.latest_bulletin()
+        if fresh and (latest is None or self._clock() - latest["at"] > PAGE_STALE):
+            self.bulletin(deliver=False)
+            latest = self.latest_bulletin()
+        return latest, render_html(latest)
 
     # --- Lecture ---------------------------------------------------------------------------------------------
 
@@ -466,6 +491,9 @@ class NewsEngine(BaseModule):
                     bulletin_id = self.bulletin(deliver=False)
                     return 201, self._bulletin_row(self._store.one("SELECT * FROM news_bulletins WHERE id = ?",
                                                                    (bulletin_id,)))
+            if parts == ["bulletins", "page"] and method == "GET":
+                bulletin, html = self.page(fresh=False) if self.latest_bulletin() else self.page()
+                return 200, {"id": bulletin["id"], "at": bulletin["at"], "html": html}
             if parts == ["alerts"] and method == "GET":
                 return 200, self._alerts.history(100, "news") if self._alerts is not None else []
             if parts == ["collect"] and method == "POST":

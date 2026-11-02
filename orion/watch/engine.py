@@ -10,6 +10,12 @@ Cycle d'une vérification :
    autorisation d'achat) ;
 5. mode « once » : COMPLETED après le premier déclenchement ; « repeat » : de nouveau ACTIVE.
 Toutes les sources en échec plusieurs fois de suite -> FAILED (et une alerte) ; ``resume`` la relance.
+
+Automatique (sauf choix explicite à la création) :
+- sources : toutes celles qui fournissent le bon type d'information, recalculées à chaque vérification (une source
+  ajoutée plus tard, comme la recherche Web, sert aussi aux surveillances existantes) ;
+- fréquence : selon le type (retour en stock 10 min, événement 15 min, annonce et prix 30 min) ;
+- un événement dont la date de fin est passée n'est jamais signalé.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Any, Callable
 
 from orion.events import Event, EventBus
@@ -38,6 +45,7 @@ from orion.watch.models import (
 )
 from orion.watch.opportunity import PriceHistory, evaluate, market_price
 from orion.watch.products import matches, plain
+from orion.watch.web import strong_keywords
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +53,7 @@ WATCH_FOUND = "watch.found"
 RELIABILITY_RANK = {"unknown": 0, "community": 1, "media": 2, "agency": 3, "official": 4}
 CACHE_SECONDS = 300.0
 MAX_ALERTS_PER_CHECK = 3
+INTERVALS = {AVAILABILITY: 10.0, EVENT: 15.0, ANNOUNCEMENT: 30.0, PRICE: 30.0}  # minutes
 
 MIGRATIONS = (
     Migration(1, """
@@ -82,6 +91,11 @@ class WatchSettings:
     requests_per_source_per_hour: int = 20
     failure_limit: int = 10
     opportunity: dict = field(default_factory=dict)
+    intervals: dict = field(default_factory=lambda: dict(INTERVALS))  # minutes par type de surveillance
+
+    def interval_for(self, kind: str) -> float:
+        minutes = self.intervals.get(kind, self.default_interval_minutes)
+        return max(float(minutes), self.min_interval_minutes) * 60
 
 
 @dataclass
@@ -121,8 +135,30 @@ class WatchEngine(BaseModule):
     def start(self) -> None:
         """Les surveillances actives reprennent là où elles en étaient (redémarrage d'ORION)."""
         for watch in self.list():
+            if self._refresh(watch):
+                self._save(watch)
             if watch.state in RUNNING:
                 self._schedule(watch)
+
+    def _sources_for(self, watch: Watch) -> tuple[str, ...]:
+        if not watch.auto_sources:
+            return watch.sources
+        kind = OFFERS if watch.condition["kind"] in (PRICE, AVAILABILITY) else ITEMS
+        return tuple(self.connectors.names(kind)) or watch.sources
+
+    def _refresh(self, watch: Watch) -> bool:
+        """Sources et fréquence automatiques mises à jour ; vrai si quelque chose a changé."""
+        changed = False
+        sources = self._sources_for(watch)
+        if sources != watch.sources:
+            watch.sources, changed = sources, True
+        if watch.auto_interval:
+            interval = self.settings.interval_for(watch.condition["kind"])
+            if interval != watch.interval_s:
+                watch.interval_s, changed = interval, True
+                if watch.next_check_at is not None and watch.last_check_at is not None:
+                    watch.next_check_at = min(watch.next_check_at, watch.last_check_at + interval)
+        return changed
 
     def stop(self) -> None:
         for watch in self.list():
@@ -167,8 +203,11 @@ class WatchEngine(BaseModule):
             found = interpret(str(spec["request"])[:500], self._llm)
             spec = {**spec, "name": spec.get("name") or found.name, "condition": found.condition,
                     "description": spec.get("description") or str(spec["request"])[:300],
-                    "sources": spec.get("sources") or self.connectors.names(found.source_kinds[0])}
+                    "sources": spec.get("sources") or self.connectors.names(found.source_kinds[0]),
+                    "auto_sources": not spec.get("sources")}
         condition = spec.get("condition") or {}
+        auto_sources = spec.get("auto_sources", not spec.get("sources"))
+        auto_interval = "interval_minutes" not in spec
         kind = OFFERS if condition.get("kind") in (PRICE, AVAILABILITY) else ITEMS
         sources = tuple(spec.get("sources") or self.connectors.names(kind))
         if not sources:
@@ -179,7 +218,10 @@ class WatchEngine(BaseModule):
                 raise WatchError(f"source inconnue : {name}")
             if connector.kind != kind:
                 raise WatchError(f"la source {name} ne fournit pas ce type d'information")
-        minutes = spec.get("interval_minutes", self.settings.default_interval_minutes)
+        if auto_interval:
+            minutes = self.settings.interval_for(condition.get("kind", "")) / 60
+        else:
+            minutes = spec["interval_minutes"]
         if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
             raise WatchError("fréquence en minutes attendue")
         minutes = max(float(minutes), self.settings.min_interval_minutes)
@@ -188,7 +230,8 @@ class WatchEngine(BaseModule):
             raise WatchError("date d'expiration dans le futur attendue")
         watch = Watch(spec.get("name", ""), condition, sources, minutes * 60, description=spec.get("description", ""),
                       expires_at=expires, channel=spec.get("channel", "auto"), mode=spec.get("mode", "once"),
-                      min_reliability=spec.get("min_reliability", "media"), created_at=self._clock())
+                      min_reliability=spec.get("min_reliability", "media"), created_at=self._clock(),
+                      auto_sources=bool(auto_sources), auto_interval=auto_interval)
         watch.next_check_at = self._clock()
         self._save(watch)
         self._history.record("watch", watch.id, "créée", {"nom": watch.name, "condition": watch.condition,
@@ -231,18 +274,22 @@ class WatchEngine(BaseModule):
 
     # --- Vérification ----------------------------------------------------------------------------------------
 
-    def _read(self, source: str) -> list:
+    def _read(self, source: str, watch: Watch | None = None) -> list:
+        """Observations d'une source (cache de 5 min). Une source « par surveillance » (recherche Web) reçoit la
+        condition, et son cache comme sa limite de requêtes sont propres à chaque surveillance."""
         now = self._clock()
-        cached = self._cache.get(source)
-        if cached is not None and now - cached[0] < CACHE_SECONDS:
-            return cached[1]
         connector = self.connectors.get(source)
         if connector is None:
             raise SourceError("source inconnue")
-        if not self._limiter.take(source, now):
+        per_watch = getattr(connector, "per_watch", False) and watch is not None
+        key = f"{source}:{watch.id}" if per_watch else source
+        cached = self._cache.get(key)
+        if cached is not None and now - cached[0] < CACHE_SECONDS:
+            return cached[1]
+        if not self._limiter.take(key, now):
             raise SourceError("limite de requêtes atteinte pour cette source")
-        data = connector.fetch({})
-        self._cache[source] = (now, data)
+        data = connector.fetch({"condition": watch.condition, "name": watch.name} if per_watch else {})
+        self._cache[key] = (now, data)
         return data
 
     def check(self, watch_id: str) -> CheckResult | None:
@@ -254,11 +301,15 @@ class WatchEngine(BaseModule):
         if watch.expires_at is not None and now >= watch.expires_at:
             self._move(watch, EXPIRED, "date d'expiration atteinte")
             return None
+        if self._refresh(watch):
+            self._save(watch)
+            self._scheduler.add(f"watch:{watch.id}", watch.interval_s, lambda wid=watch.id: self.check(wid),
+                                now + watch.interval_s)
         observations: list = []
         errors: dict[str, str] = {}
         for source in watch.sources:
             try:
-                observations += self._read(source)
+                observations += self._read(source, watch)
             except SourceError as exc:
                 errors[source] = str(exc)
             except Exception as exc:  # noqa: BLE001 - connecteur en erreur imprévue : noté, la surveillance continue
@@ -405,9 +456,10 @@ class WatchEngine(BaseModule):
         floor = RELIABILITY_RANK.get(watch.min_reliability, 2)
         findings, counts = [], {"articles_vus": len(items), "correspondants": 0, "rumeurs_ou_fuites": 0,
                                 "sources_trop_peu_fiables": 0}
+        keywords = [plain(k) for k in strong_keywords(c["keywords"])]  # « disponibles », « sont »… non exigés
         for item in items:
             text = plain(f"{item.title} {item.summary}")
-            if not all(k in text for k in (plain(k) for k in c["keywords"])):
+            if not all(k in text for k in keywords):
                 continue
             counts["correspondants"] += 1
             info = ev.classify(item, self._clock())
@@ -418,6 +470,10 @@ class WatchEngine(BaseModule):
                 counts["sources_trop_peu_fiables"] += 1
                 continue
             if not ev.satisfies(info, c["require"]):
+                continue
+            last_day = info.end or info.start
+            if last_day is not None and last_day < datetime.fromtimestamp(self._clock()).date():
+                counts["passés"] = counts.get("passés", 0) + 1  # événement terminé : jamais signalé
                 continue
             change = self.calendar.update(watch.id, info, item.url) if c["kind"] == EVENT else "new"
             if change == "same":

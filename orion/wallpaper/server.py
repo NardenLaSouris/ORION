@@ -56,6 +56,7 @@ class WallpaperServer:
         self._host, self._port, self._face_port = host, port, face_port
         self._allowed = frozenset(allowed_ips) | {"127.0.0.1", "::1"}
         self._tools, self._user, self._inbox = tools, user, inbox
+        self.pages: dict = {}  # chemin -> fonction qui rend une page HTML (bulletin d'actualités : /bulletin)
         self.token = secrets.token_urlsafe(24)  # nouveau à chaque démarrage, lu par la page elle-même
         self._recent: deque[float] = deque()
         self._lock = threading.Lock()
@@ -141,6 +142,13 @@ class WallpaperServer:
                 if path in FILES:
                     file, kind = FILES[path]
                     return self._send(file.read_bytes(), kind)
+                if path in server.pages:
+                    try:
+                        page = server.pages[path]()
+                    except Exception:  # noqa: BLE001 - page indisponible : erreur sobre, jamais de trace
+                        log.exception("Fond d'écran : page %s indisponible", path)
+                        return self.send_error(503)
+                    return self._send(page.encode("utf-8"), "text/html; charset=utf-8")
                 self.send_error(404)
 
             def do_POST(self):  # noqa: N802

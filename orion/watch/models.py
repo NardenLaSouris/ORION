@@ -119,6 +119,8 @@ class Watch:
     failures: int = 0
     last_error: str = ""
     triggers: int = 0
+    auto_sources: bool = True  # sources recalculées à chaque vérification (toutes celles qui conviennent)
+    auto_interval: bool = True  # fréquence selon le type de surveillance (WatchSettings.intervals)
 
     def __post_init__(self) -> None:
         self.name = re.sub(r"\s+", " ", str(self.name or "")).strip()

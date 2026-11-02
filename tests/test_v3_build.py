@@ -102,7 +102,7 @@ def test_news_and_watch_together_share_the_news_source(tmp_path):
     v3 = build_v3(cfg, presence=Presence(None), notifications=Notifications())
     try:
         assert {"news_bulletin", "create_watch"} <= {t.name for t in v3.tools}
-        assert v3.registry.get("watch").connectors.names() == ["news"]
+        assert "news" in v3.registry.get("watch").connectors.names()  # plus la recherche Web si elle est activée
         assert v3.registry.order() == ["notifications", "news", "watch"]
     finally:
         v3.stop()

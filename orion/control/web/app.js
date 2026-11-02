@@ -504,7 +504,16 @@
     await render(entry.details || {});
   }
 
+  // Surveillances : la page se met à jour d'elle-même (sauf pendant une saisie), fiche ouverte comprise.
+  let watchTimer = null, watchOpen = null;
+
   async function watchView() {
+    clearInterval(watchTimer);
+    watchTimer = setInterval(() => {
+      const typing = document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName);
+      if (state.view !== "watch") clearInterval(watchTimer);
+      else if (!typing) show("watch");
+    }, 30000);
     await moduleView("Surveillances", "watch", async (status) => {
       const watches = await mod("watch", "", "GET");
       const refresh = () => show("watch");
@@ -512,9 +521,12 @@
       const act2 = (path, ok, method = "POST") => act(mod("watch", path, method), ok).then(refresh);
       const detail = el("div", {});
       async function open(id) {
+        watchOpen = id;
         const d = await mod("watch", `/${encodeURIComponent(id)}`);
         detail.replaceChildren(el("h2", {}, d.name),
-          el("div", { class: "muted small" }, `Condition : ${JSON.stringify(d.condition)} · Sources : ${d.sources.join(", ")}`),
+          el("div", { class: "muted small" }, `Condition : ${JSON.stringify(d.condition)} · Sources : ${d.sources.join(", ")}`
+            + `${d.auto_sources ? " (automatiques)" : ""} · Vérifiée toutes les ${Math.round(d.interval_s / 60)} min`
+            + `${d.auto_interval ? " (automatique)" : ""}`),
           el("h3", {}, "Vérifications"),
           table(["Heure", "Résultat", "Résumé", "Erreurs"], d.checks.map((c) => [stamp(c.at), c.ok ? "✓" : "✗",
             JSON.stringify(c.summary), Object.entries(c.errors).map(([k, v]) => `${k} : ${v}`).join(" ; ") || "—"])),
@@ -539,7 +551,10 @@
             ["ACTIVE", "TRIGGERED"].includes(w.state) ? button("Vérifier", () => act2(`/${w.id}/check`, "Vérifiée.")) : null,
             button("Supprimer", () => confirm(`Supprimer « ${w.name} » ?`) && act2(`/${w.id}`, "Supprimée.", "DELETE"), "danger"))]),
           "Aucune surveillance."),
+        el("p", { class: "muted small" }, "Vérification automatique : sources choisies selon le sujet (dont la recherche "
+          + "Web), toutes les 10 à 30 min selon le type ; cette page se met à jour toute seule."),
         detail);
+      if (watchOpen && watches.some((w) => w.id === watchOpen)) open(watchOpen);
     });
   }
 
@@ -565,6 +580,8 @@
         categories: cats.filter(([, box]) => box.checked).map(([k]) => k),
       }), "Réglages enregistrés.").then(refresh);
       const latest = bulletins[0];
+      let page = null;
+      try { page = await mod("news", "/bulletins/page"); } catch (error) { page = null; }
       view.replaceChildren(
         el("h1", {}, "Actualités"),
         cards([["Sources", status.sources], ["Événements (48 h)", status["événements_48h"]],
@@ -582,7 +599,9 @@
             el("label", {}, alertsOn, " alertes"), el("label", {}, bulletinsOn, " bulletins")),
           button("Enregistrer", save, "primary")),
         el("h2", {}, "Dernier bulletin"),
-        latest ? el("pre", { class: "small", style: "white-space:pre-wrap" }, latest.text) : el("div", { class: "empty" }, "Aucun bulletin."),
+        page ? el("iframe", { srcdoc: page.html, sandbox: "allow-popups allow-popups-to-escape-sandbox", title: "Dernier bulletin",
+          style: "width:100%;height:640px;border:1px solid var(--line, #333);border-radius:8px;background:#f4f6fa" })
+          : latest ? el("pre", { class: "small", style: "white-space:pre-wrap" }, latest.text) : el("div", { class: "empty" }, "Aucun bulletin."),
         el("h2", {}, "Événements"),
         table(["Titre", "Catégorie", "Statut", "Score", "Niveau", "Sources"], stories.map((s) =>
           [s.title, s.category, s.status, String(s.score), s.tier, String(s.sources)])),

@@ -58,7 +58,8 @@ class MailProvider(Protocol):
 
     def delete(self, message_id: str) -> None: ...
 
-    def send(self, to: str, subject: str, body: str, reply_to: MailMessage | None = None) -> None: ...
+    def send(self, to: str, subject: str, body: str, reply_to: MailMessage | None = None,
+             html: str | None = None) -> None: ...
 
 
 # --- Analyse d'un message ---------------------------------------------------------------------------------
@@ -386,12 +387,16 @@ class ImapSmtpProvider:
         """Vers la corbeille (récupérable), jamais une suppression définitive."""
         self._change(message_id, lambda imap, uid: self._move(imap, uid, self._trash))
 
-    def send(self, to: str, subject: str, body: str, reply_to: MailMessage | None = None) -> None:
+    def send(self, to: str, subject: str, body: str, reply_to: MailMessage | None = None,
+             html: str | None = None) -> None:
+        """``html`` : version mise en page, jointe au texte (les messageries affichent l'une ou l'autre)."""
         message = EmailMessage()
         message["From"], message["To"], message["Subject"] = self._user, to, subject
         if reply_to is not None and reply_to.headers.get("Message-ID"):
             message["In-Reply-To"] = message["References"] = reply_to.headers["Message-ID"]
         message.set_content(body)
+        if html:
+            message.add_alternative(html, subtype="html")
         try:
             with self._smtp_factory(self._smtp_host, self._smtp_port, timeout=self._timeout) as smtp:
                 smtp.login(self._user, self._password)
@@ -463,5 +468,7 @@ class MemoryMailProvider:
     def replied(self, message: MailMessage) -> bool | None:
         return message.answered or any(s["reply_to"] == message.id for s in self.sent)
 
-    def send(self, to: str, subject: str, body: str, reply_to: MailMessage | None = None) -> None:
-        self.sent.append({"to": to, "subject": subject, "body": body, "reply_to": reply_to.id if reply_to else None})
+    def send(self, to: str, subject: str, body: str, reply_to: MailMessage | None = None,
+             html: str | None = None) -> None:
+        self.sent.append({"to": to, "subject": subject, "body": body, "reply_to": reply_to.id if reply_to else None,
+                          **({"html": html} if html else {})})

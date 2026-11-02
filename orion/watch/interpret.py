@@ -23,7 +23,8 @@ STOP = {"previens", "moi", "quand", "les", "des", "une", "un", "le", "la", "sur"
         "surveille", "surveiller", "dis", "lorsqu", "lorsque", "qu", "arrivent", "arrive", "il", "y", "aura",
         "nouveau", "nouvelle", "officielle", "officiel", "officielles", "annonces", "annonce", "sortie", "pokemon",
         "go", "pogo", "previens-moi", "alerte", "en", "est", "sont", "d", "l", "s", "que", "tu", "me",
-        "veux", "voudrais", "savoir", "signale", "dans", "jeu"}
+        "veux", "voudrais", "savoir", "signale", "dans", "jeu", "disponible", "disponibles", "dispo", "seront",
+        "sera", "arriveront", "sortent", "revient", "reviennent", "retour", "prochain", "prochaine"}
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 
 - **Branche d'intégration :** `v3`. Dépôt de travail : `C:\Users\theju\jarvis` (PC fixe). Les tests tournent sur le
   mini-PC, dans le miroir `~/orion-v3`, synchronisé par le script `v3sync.sh` du scratchpad.
-- **Dernier commit validé :** voir `git log -1 v3`. La suite complète passe (2214 tests au dernier passage).
+- **Dernier commit validé :** voir `git log -1 v3`. La suite complète passe (2243 tests au dernier passage).
 - **Production `/opt/orion` (mini-PC) :** branche `v3`, commit `cdae70e`, depuis le 2 novembre au soir, à la demande
   explicite du propriétaire (« V3 partout »).
   - `[platform]`, WATCH, NEWS, EVOLVE et PURCHASE sont activés.
@@ -35,27 +35,21 @@ Options proposées :
   démarrage du PC.
 - F3, premier point : l'origine des alertes NEWS vient de l'identité de ce qui les émet, plus jamais du contexte.
 
-## F3 : reste à faire (dans cet ordre)
+## F3 : livré sur `v3` (non déployé)
 
-1. Annulation coopérative des tâches, avec :
-   - signal d'annulation ;
-   - points de contrôle ;
-   - vérification des permissions avant chaque effet externe ;
-   - état `cancel_pending` ;
-   - rapport explicite si une tâche ne s'arrête pas.
+- Classification NEWS par l'identité de ce qui émet : `87dc49d`.
+- Annulation coopérative et bail renouvelé : `d313ec3`.
+- `EventHub` (événements, décisions, remises), notifications manquées, récapitulatif, relance : `bc6b96d`.
+- Documentation : `docs/v3/foundation.md`, § « Lot F3 ».
+- Reste à faire : rapport au propriétaire, puis F4 (stockage et chiffrement) après son accord, comme le demande la
+  validation de F3.
 
-   Renouvellement des réservations (heartbeat).
-2. Événements normalisés (`EventHub`), qui couvrent :
-   - format commun, provenance et dédoublonnage ;
-   - priorités, expiration, distribution persistante et reprise ;
-   - règle d'interruption centralisée (heures calmes, disponibilité) ;
-   - séparation entre événement, décision et annonce.
-3. Notifications manquées pendant l'arrêt d'urgence :
-   - rappels et annonces de mails gardés ;
-   - récapitulatif à la reprise ;
-   - consultation, et relance manuelle sauf si obsolète ;
-   - jamais de rejeu automatique.
-4. Documentation F3, puis rapport au propriétaire avant F4.
+## Prochain chantier
+
+En attendant les décisions (déploiement, F4), travaux indépendants, sans déploiement :
+- revue de cohérence de la vue ORION Control de F3, sur une démonstration locale avec des données factices ;
+- préparation de l'inventaire Google Takeout (outil d'inventaire qui ne lit que les métadonnées, testé sur des
+  archives factices).
 
 ## Google Takeout
 

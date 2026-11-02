@@ -345,3 +345,105 @@ ORION Control → Autonomie → « Confirmations en attente » (« Accorder une 
    Control). Le passage de ces chemins à des confirmations liées est prévu en F3.
 8. **Signature du registre :** préparée et testée avec une clé factice, mais inactive. Aucune clé réelle n'a été
    créée.
+
+---
+
+# Lot F3 : événements normalisés, notifications, annulation coopérative
+
+Livré sur `v3` le 3 novembre 2026, développé et testé sans déploiement (voir `docs/v3/progression.md`).
+
+## Fichiers
+
+| Fichier | Rôle |
+|---|---|
+| `orion/platform/eventhub.py` (nouveau) | `Event`, `EventHub`, `EventGate`, `InterruptionPolicy` |
+| `orion/platform/alerts.py` | canaux choisis par `InterruptionPolicy.route` ; chaque alerte inscrite au hub (`record`) |
+| `orion/notifications/manager.py` | `attach_hub` : les notifications V2 passent par le hub (décision, remise) |
+| `orion/platform/tasks.py` | annulation coopérative, effets revérifiés, bail renouvelé |
+| `orion/platform/foundation.py` | hub, récapitulatif à la reprise, outils vocaux, routes `/api/events` |
+| `orion/news/engine.py` | origine déclarée des bulletins et des alertes spontanées |
+| `tests/test_platform_events.py` (nouveau), `tests/test_platform_tasks.py` | 21 + 8 tests |
+
+## Événement, décision, remise
+
+Les trois sont séparés et gardés dans `orion_ops.db` :
+
+1. **Événement** (`events`) :
+   - **Contenu :** type `domaine.nature`, source, principal, titre, texte (privé ou non), priorité (`low`, `normal`,
+     `high`, `critical`), clé de dédoublonnage, échéance de validité, données.
+   - **Provenance :** fixée par le code d'ORION. Un module (NEWS, SENTINEL…) publie par un `EventGate` à identité fixe,
+     limité à ses propres types ; il ne peut jamais publier sous `user`.
+2. **Décision** (`event_decisions`), une seule règle, appliquée dans cet ordre :
+   1. échéance passée : `expired` ;
+   2. moteur central (`NOTIFY`) :
+      - refus pour arrêt d'urgence ou état indéterminé : `missed` ;
+      - autre refus : `denied` ;
+   3. priorité basse : `kept` ;
+   4. heures calmes :
+      - `deferred` jusqu'à leur fin ;
+      - `kept` si l'échéance tombe avant ;
+      - sauf ce dont vous avez fixé l'heure (rappel, minuteur, agenda, routine) et le critique si c'est réglé ;
+   5. sinon `announce`.
+
+   Événement répété avec la même clé dans les 12 h : `duplicate`.
+3. **Remise** (`event_deliveries`) :
+   - par canal ;
+   - en cas d'échec, nouvel essai (30 s, 1 min, 2 min…, plafonné à 1 h) jusqu'à l'échéance, y compris après un
+     redémarrage d'ORION ;
+   - permission revérifiée juste avant chaque remise ;
+   - jamais de remise après l'échéance.
+
+Le routeur d'alertes des modules garde ses canaux (voix, écrit, appel, budget d'appels), mais les choisit par la même
+règle (`InterruptionPolicy.route`) et inscrit chaque alerte et sa décision au hub.
+
+## Notifications manquées (arrêt d'urgence)
+
+| | Pendant SUSPENDED | Pendant EMERGENCY_STOP | À la reprise |
+|---|---|---|---|
+| Rappels, minuteurs | dits | gardés `missed` | récapitulatif, relance manuelle si non obsolète |
+| Annonces des nouveaux mails | dites | gardées `missed` | récapitulatif ; jamais d'annonce rétroactive de tous les mails |
+| Alertes des modules | selon leur origine | gardées `missed` | idem |
+
+- **Jamais de rejeu automatique :** ni la remise différée, ni la reprise ne rejouent un événement manqué.
+- **Récapitulatif :** il est donné une seule fois, au premier état moins strict après l'arrêt d'urgence (« Pendant
+  l'arrêt d'urgence, vous avez manqué : 2 rappels, 1 annonce de mail. »).
+- **Relance :** voix (« mes notifications manquées », « relance la deuxième ») ou ORION Control (Autonomie →
+  Notifications manquées) ; un module ne le peut jamais.
+- **Obsolète :** échéance passée. Rappel : 6 h ; minuteur et routine : 1 h ; rendez-vous : 2 h ; mail : 3 jours. Une
+  notification obsolète n'est jamais rejouée.
+
+## Classification des alertes NEWS
+
+- L'origine vient de l'identité et du type réel de ce qui émet :
+  - bulletin : `delegated:news:bulletins` (ou le principal du bulletin ponctuel) ;
+  - alerte spontanée : `module:news`, toujours.
+- `Alert.principal` ne lit plus jamais le contexte de la tâche appelante : `principal_for` est retiré. Un test
+  déclenche une alerte spontanée pendant un bulletin programmé : elle est refusée pendant la suspension, le bulletin
+  passe.
+
+## Annulation coopérative et bail
+
+- `cancel` sur une tâche en cours : état `cancel_pending`, jamais annoncé comme fait.
+- La tâche s'arrête à son prochain `TaskRun.checkpoint()`, qui lève `TaskCancelled`. Elle passe alors `cancelled`,
+  avec l'inscription `task.stopped`.
+- `TaskRun.effect(capability, …)` : point de contrôle, puis décision du moteur central juste avant chaque effet
+  extérieur (`PermissionDenied` si refusé).
+- **Tâche terminée sans point de contrôle :** elle reste `done` (ou `cancelled` si périodique, sans occurrence
+  suivante), avec le message « n'a pas pu s'interrompre » et l'inscription `task.cancel_late`.
+- **Arrêt d'urgence :** toutes les tâches en cours passent `cancel_pending`. La réponse vocale dit combien tournent
+  encore ; elle ne prétend jamais que tout est arrêté.
+- **Bail :** un fil le renouvelle pendant l'exécution (tous les `timeout`/3). Une tâche active n'est jamais reprise par
+  un autre processus ; seul un processus arrêté laisse son bail échoir.
+- **Processus arrêté pendant une annulation :** la tâche passe `cancelled`, avec « résultat inconnu ».
+
+## Écarts et risques résiduels (F3)
+
+1. **Annonces V2 sans canal écrit :** elles n'ont que la voix. Une notification V2 différée par les heures calmes est
+   dite à leur fin, pas écrite. Les alertes des modules gardent l'écrit et l'appel.
+2. **Présence ignorée :** la règle ne s'en sert pas encore pour les notifications V2, comme avant F3. Un rappel est dit
+   même si la maison est vide. À arbitrer : le garder pour votre retour ?
+3. **Point de contrôle volontaire :** l'annulation coopérative ne sert que si le code de la tâche appelle
+   `checkpoint` ou `effect`. Les types existants (`news.bulletin`) sont courts ; une tâche longue doit le faire.
+4. **Planificateur des modules :** ses tâches périodiques ne passent pas encore par `TaskService` (pas de
+   `cancel_pending` pour elles). L'arrêt d'urgence les retient avant chaque tâche, comme en F1.
+5. **Échéances par défaut :** celles des notifications sont fixées par source, et non réglables dans ORION Control.

@@ -108,6 +108,16 @@ def parse_message(message_id: str, raw: bytes, flags: str = "") -> MailMessage:
 
 # --- IMAP / SMTP ---------------------------------------------------------------------------------------
 
+# Connexion perdue en pleine opération (délai de lecture dépassé, coupure TLS, « abort » du serveur) : même réponse
+# qu'une boîte injoignable, jamais une erreur imprévue (journal du 16 au 28 octobre 2026 : traces complètes).
+LOST = (imaplib.IMAP4.abort, OSError)
+
+
+def _lost(exc: BaseException) -> MailError:
+    log.warning("Mail : connexion IMAP perdue en cours d'opération (%s)", type(exc).__name__)
+    return MailError(MAIL_UNAVAILABLE, "La boîte mail ne répond pas.")
+
+
 class ImapSmtpProvider:
     def __init__(self, user: str, password: str, imap_host: str, smtp_host: str = "", imap_port: int = 993,
                  smtp_port: int = 465, folder: str = "INBOX", archive_folder: str = "Archive",
@@ -224,6 +234,8 @@ class ImapSmtpProvider:
             imap = self._session()
             try:
                 return len(self._uids(imap, "UNSEEN"))
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
 
@@ -235,6 +247,8 @@ class ImapSmtpProvider:
                 if not unread_only:
                     return self._latest(imap, limit)
                 return self._fetch(imap, self._uids(imap, "UNSEEN")[-limit:], full=False)
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
 
@@ -248,6 +262,8 @@ class ImapSmtpProvider:
                 categories = self._categories(imap)
                 found = [replace(m, labels=m.labels + (categories[m.id],)) if m.id in categories else m for m in found]
                 return len(uids), found
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
 
@@ -270,6 +286,8 @@ class ImapSmtpProvider:
                     found = uids if found is None else found & uids
                 ordered = sorted(found or (), key=int)
                 return self._fetch(imap, ordered[-max(1, min(limit, self.max_fetch)):], full=False)
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
 
@@ -280,6 +298,8 @@ class ImapSmtpProvider:
             imap = self._session()
             try:
                 found = self._fetch(imap, [str(message_id).encode()])
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
         if not found:
@@ -324,6 +344,8 @@ class ImapSmtpProvider:
             imap = self._session(readonly=False)
             try:
                 action(imap, str(message_id))
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
 
@@ -342,6 +364,8 @@ class ImapSmtpProvider:
                     if status != "OK":
                         raise MailError(MAIL_UNAVAILABLE, "La boîte mail a refusé de marquer les mails comme lus.")
                 return len(uids)
+            except LOST as exc:
+                raise _lost(exc) from exc
             finally:
                 self._close(imap)
 

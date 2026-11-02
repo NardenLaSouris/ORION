@@ -348,6 +348,7 @@ class Agent:
         self._call_rules = call_rules  # règles d'appel (orion/call/rules.py) : accusé « c'est noté »
         self._clarify: dict | None = None  # outil en attente d'une précision (règle d'appel incomplète)
         self._in_call = None  # appel décroché, pris par la prochaine conversation
+        self._call = None  # appel de la conversation en cours (« c'est noté » acquitte celui-là)
         # Messages Linphone : réponse écrite (rien n'est prononcé), fil gardé MESSAGE_THREAD secondes.
         self._texting = False
         # Un fil par canal écrit (« message » : Linphone, « wallpaper » : fond d'écran) : (historique, dernier usage).
@@ -414,7 +415,7 @@ class Agent:
             except Exception:  # noqa: BLE001 - la reprise ne doit jamais échouer à son tour
                 log.exception("Reprise après erreur incomplète")
         self._follow_up = None
-        self._in_call = None
+        self._in_call = self._call = None
         self._lead = []
 
     def _wait_for_wake_word(self) -> bool:
@@ -566,6 +567,7 @@ class Agent:
         self._router.start_conversation()
         offer, self._follow_up = self._follow_up, None
         call, self._in_call = self._in_call, None
+        self._call = call
         if call is not None:
             self._greet_call(call)
         elif offer is None:
@@ -584,6 +586,7 @@ class Agent:
         try:
             return self._converse(history, offer, call, timeout)
         finally:
+            self._call = None
             if call is not None:
                 self._calls.finish()  # ORION raccroche s'il est encore en ligne ; retour au terminal de la maison
 
@@ -732,8 +735,8 @@ class Agent:
             self._event("routing", latency["route"])
             return self._run_call(history, f"{clarify['text']} ; précision : {text}",
                                   {"type": "tool_call", "tool": clarify["tool"], "parameters": {}}, latency), False
-        if (self._call_rules is not None and self._in_call is not None and is_acknowledgement(text)
-                and self._call_rules.acknowledge(self._in_call.id)):
+        if (self._call_rules is not None and self._call is not None and is_acknowledgement(text)
+                and self._call_rules.acknowledge(self._call.id)):
             return self._say_text(history, text, "C'est noté, monsieur. Je ne vous rappellerai pas à ce sujet.",
                                   latency), True
         if (self._call_rules is not None and self._texting and is_acknowledgement(text)
@@ -817,7 +820,7 @@ class Agent:
 
     def _report_false_wake(self) -> None:
         """« Ce n'était pas pour toi » juste après un réveil : le mot de réveil se durcit (jarvis.learning)."""
-        if self._texting or self._in_call is not None or self._last_wake is None or self._learning is None:
+        if self._texting or self._call is not None or self._last_wake is None or self._learning is None:
             return
         learned = self._learning.false_wake(self._last_wake)
         self._false_wake = True

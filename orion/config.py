@@ -70,6 +70,7 @@ class TTSConfig:
     length_scale: float = 1.0
     volume: float = 1.0
     pronunciations: dict = field(default_factory=dict)
+    soften_endings: bool = True  # fin de phrase coupée en pleine voyelle : éteinte en 40 ms (orion/tts/piper.py)
     stream_audio: bool = False
     merge_under: int = 0
     neutts: dict = field(default_factory=dict)

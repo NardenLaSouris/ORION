@@ -88,6 +88,9 @@ voice = "models/piper/fr_FR-orion-medium.onnx"
 speaker = ""
 length_scale = 1.0      # > 1 = plus lent
 volume = 1.0
+# Piper : une phrase coupée net en pleine voyelle (« ORION. », « disposition. ») est prolongée de 40 ms par son
+# miroir qui s'éteint. Les phrases qui s'éteignent déjà ne changent pas. false : sortie brute du modèle.
+soften_endings = true
 # true : lecture par morceaux pendant la synthèse (NeuTTS seulement ; hache la voix si le CPU est trop lent).
 stream_audio = false
 # Une phrase de moins de N caractères est synthétisée avec la suivante, pour éviter un silence

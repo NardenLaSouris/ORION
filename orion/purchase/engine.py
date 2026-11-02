@@ -216,7 +216,7 @@ class PurchaseEngine(BaseModule):
                         "livraison comprise. Confirmez ou refusez dans ORION Control.", Level.HIGH)
             return order
         self._move(order, CONFIRMED, f"automatique (niveau {level})")
-        return self.execute(order.id)
+        return self.place_order(order.id)
 
     def effective_level(self, mandate: Mandate, total: float) -> int:
         """Niveau réellement permis pour cet achat : le plus bas entre le réglage et le mandat ; le niveau 3 exige en
@@ -244,7 +244,7 @@ class PurchaseEngine(BaseModule):
             raise PurchaseError("seul l'utilisateur confirme un achat")
         order = self._order(order_id)
         self._move(order, CONFIRMED, "confirmée par l'utilisateur")
-        return self.execute(order_id).as_dict()
+        return self.place_order(order_id).as_dict()
 
     def cancel(self, order_id: str, reason: str = "annulée par l'utilisateur") -> dict:
         with self._lock:
@@ -269,7 +269,7 @@ class PurchaseEngine(BaseModule):
                 mandate.state, mandate.state)
         return ""
 
-    def execute(self, order_id: str) -> Order:
+    def place_order(self, order_id: str) -> Order:
         with self._lock:
             order = self._order(order_id)
             if order.state != CONFIRMED:

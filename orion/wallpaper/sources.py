@@ -150,9 +150,10 @@ def schedule_source(timers) -> Callable[[], list]:
             items.append({"kind": "minuteur", "label": "Minuteur", "seconds": max(0, round((t.expires_at - now)
                                                                                        .total_seconds()))})
         for r in timers.reminders():
-            items.append({"kind": "rappel", "label": (r.message or "Rappel")[:60],
+            # Numéro du rappel : suppression depuis la fiche « Agenda, rappels et minuteurs » (cancel_reminder).
+            items.append({"kind": "rappel", "id": str(r.id), "label": (r.message or "Rappel")[:60],
                           "seconds": max(0, round((r.expires_at - now).total_seconds())), "at": _clock(r.expires_at)})
-        return sorted(items, key=lambda i: i["seconds"])[:6]
+        return sorted(items, key=lambda i: i["seconds"])[:12]
     return read
 
 

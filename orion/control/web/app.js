@@ -131,8 +131,19 @@
     ]);
     const llm = status.llm;
     const lights = status.lights;
-    const schedule = [...status.schedule.timers.map((t) => `Minuteur : encore ${t.remaining} (${t.ends_at})`),
-      ...status.schedule.reminders.map((r) => `Rappel « ${r.message} » à ${r.at}`)];
+    const timersText = status.schedule.timers.map((t) => `Minuteur : encore ${t.remaining} (${t.ends_at})`);
+    const reminders = status.schedule.reminders;
+    // Suppression d'un rappel (outil cancel_reminder, sans confirmation vocale) ou de tous, après confirmation ici.
+    const removeReminder = (r) => act(api("POST", "/tools/cancel_reminder", { parameters: { reminder_id: r.id } }),
+      "Rappel supprimé.").then(() => show("dashboard"));
+    const removeAll = async () => {
+      if (!confirm(`Supprimer ${reminders.length === 1 ? "le rappel" : `les ${reminders.length} rappels`} ?`)) return;
+      for (const r of reminders) {
+        await act(api("POST", "/tools/cancel_reminder", { parameters: { reminder_id: r.id } }));
+      }
+      toast("Rappels supprimés.", "ok");
+      show("dashboard");
+    };
     view.replaceChildren(
       el("h1", {}, "Tableau de bord"),
       el("div", { class: "grid" },
@@ -153,7 +164,13 @@
           el("div", { class: "big" }, `${status.routines.enabled} active${status.routines.enabled > 1 ? "s" : ""}`, el("span", { class: "muted small" }, ` / ${status.routines.total}`)),
           status.routines.next.map((r) => el("div", { class: "muted small" }, `${r.name} : ${when(r.next_run)}`))),
         el("div", { class: "card" }, el("h3", {}, "Minuteurs et rappels"),
-          schedule.length ? schedule.map((s) => el("div", { class: "small" }, s)) : el("div", { class: "muted" }, "Rien de prévu")),
+          timersText.map((s) => el("div", { class: "small" }, s)),
+          reminders.map((r) => el("div", { class: "row small" },
+            el("span", { class: "grow" }, `Rappel « ${r.message} » à ${r.at}`),
+            el("button", { class: "btn icon danger", title: "Supprimer ce rappel", onclick: () => removeReminder(r) },
+              "✕"))),
+          reminders.length > 1 ? el("button", { class: "btn danger", onclick: removeAll }, "Tout supprimer") : null,
+          timersText.length || reminders.length ? null : el("div", { class: "muted" }, "Rien de prévu")),
         el("div", { class: "card" }, el("h3", {}, "Dernière activité"),
           status.last_activity ? [el("div", {}, status.last_activity.subject), el("div", { class: "muted small" }, clock(status.last_activity.time))]
             : el("div", { class: "muted" }, "Aucune")),

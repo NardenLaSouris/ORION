@@ -11,11 +11,13 @@ au message (lecture BODY.PEEK : il reste non lu ; ni réponse, ni archivage, ni 
     -> réponse envoyée (vous avez répondu : on vérifie s'il reste à faire) | en attente d'un retour
     -> action accomplie | résolu | abandonné (échéance dépassée, ou vous l'abandonnez)
 
-Échéance fiable (écrite dans le mail) et action attendue : rappels à J-1 et à H-1 h 30, créés une seule fois
-(clé par dossier), mis à jour si un nouveau message change l'échéance (sauf report demandé par vous), annulés si le
-dossier est réglé. Horaires déjà passés : seuls les rappels encore à venir ; s'il n'en reste aucun et que
-l'échéance n'est pas passée, un rappel de rattrapage tout de suite. Échéance estimée : ORION demande de la
-confirmer avant de programmer quoi que ce soit. Sans échéance : le dossier reste dans la liste « à traiter ».
+Échéance trouvée (écrite dans le mail, ou estimée) et action attendue : ORION demande d'abord s'il doit programmer
+des rappels (« oui » juste après l'annonce suffit ; « non » écarte l'échéance) ; rien n'est créé sans votre accord
+(un mail de banque « changements à venir » avait reçu deux rappels d'office, le 2 novembre 2026). Une fois accepté :
+rappels à J-1 et à H-1 h 30, créés une seule fois (clé par dossier), mis à jour si un nouveau message change
+l'échéance (la question est alors reposée ; sauf report demandé par vous), annulés si le dossier est réglé. Horaires
+déjà passés : seuls les rappels encore à venir ; s'il n'en reste aucun et que l'échéance n'est pas passée, un rappel
+de rattrapage tout de suite. Sans échéance : le dossier reste dans la liste « à traiter ».
 """
 
 from __future__ import annotations
@@ -93,13 +95,16 @@ def _clean(text, limit: int) -> str:
 
 class MailActions:
     def __init__(self, path: Path, box, llm, reminders=None, clock: Callable[[], datetime] = datetime.now,
-                 notify: Callable[[str], None] | None = None):
+                 notify: Callable[[str], None] | None = None,
+                 ask: Callable[[str, dict], None] | None = None):
         self.path = Path(path)
         self.box = box  # MailBox : fournisseur (lecture BODY.PEEK, réponses) et tri
         self._llm = llm
         self._reminders = reminders  # TimerManager
         self._clock = clock
         self._notify = notify or (lambda text: None)
+        # Question avec sa suite (« oui » juste après l'annonce : outil et paramètres) ; sans elle, simple annonce.
+        self._ask = ask or (lambda text, follow_up: self._notify(text))
         self._lock = threading.RLock()
         self.items: dict[str, dict] = {}
         self._queue: queue.Queue = queue.Queue()
@@ -222,18 +227,24 @@ class MailActions:
             self._cancel_reminders(item)
             self._history(item, "échéance déjà dépassée")
             return
-        if not dl["explicit"] and not dl.get("confirmed"):
+        if not dl.get("confirmed"):
+            already = item.get("question") == "confirm_deadline" and previous and previous.get("at") == dl["at"]
             item["state"] = DEADLINE
             item["question"] = "confirm_deadline"
-            self._history(item, "échéance estimée : à confirmer")
-            self._notify(f"J'ai cru comprendre une échéance dans le mail « {item['subject']} » : "
-                         f"{_spoken_date(dl['at'])}. Pouvez-vous me la confirmer ?")
+            if already:
+                return  # même échéance, déjà demandée : pas de seconde question
+            self._history(item, "échéance trouvée : rappels à confirmer" if dl["explicit"]
+                          else "échéance estimée : à confirmer")
+            found_text = "J'ai identifié une échéance" if dl["explicit"] else "J'ai cru comprendre une échéance"
+            self._ask(f"{found_text} dans le mail « {item['subject']} » : {_spoken_date(dl['at'])}. Voulez-vous "
+                      "que je programme des rappels ?",
+                      {"tool": "confirm_mail_deadline", "parameters": {"answer": "oui", "thread": item["thread"]}})
             return
         self._schedule(item)
 
     # --- Rappels ----------------------------------------------------------------------------------------------
 
-    def _schedule(self, item: dict) -> None:
+    def _schedule(self, item: dict, announce: bool = True) -> None:
         if self._reminders is None:
             item["state"] = DEADLINE
             return
@@ -278,7 +289,7 @@ class MailActions:
                 log.warning("Suivi des mails : rappel de rattrapage non programmé (%s)", exc)
         item["state"] = SCHEDULED if item["reminders"] else DEADLINE
         self._history(item, f"rappels : {', '.join(sorted(item['reminders'])) or 'aucun'}")
-        if created:
+        if created and announce:
             count = len(created)
             self._notify(f"J'ai identifié une échéance dans le mail « {item['subject']} » : "
                          f"{_spoken_date(item['deadline']['at'])}. Je vous ai préparé "
@@ -353,8 +364,13 @@ class MailActions:
             self._save()
             return item
 
-    def confirm_deadline(self, position: int, confirmed: bool) -> dict:
+    def confirm_deadline(self, position: int, confirmed: bool, thread: str | None = None) -> dict:
+        """« Oui » : rappels programmés ; « non » : échéance écartée. ``thread`` : le dossier de l'annonce (suite
+        proposée), sinon le numéro parmi les échéances qui attendent une réponse."""
         items = [i for i in self.open_items() if i.get("question") == "confirm_deadline"] or self.open_items()
+        if thread:
+            items = [i for i in items if i["thread"] == thread]
+            position = 1
         if not 1 <= position <= len(items):
             raise ToolError(INVALID_PARAMETERS, "Aucune échéance n'attend votre confirmation.")
         with self._lock:
@@ -362,7 +378,8 @@ class MailActions:
             item.pop("question", None)
             if confirmed and item.get("deadline"):
                 item["deadline"]["confirmed"] = True
-                self._schedule(item)
+                self._history(item, "rappels acceptés par vous")
+                self._schedule(item, announce=False)  # l'outil le dit déjà
             else:
                 item.pop("deadline", None)
                 item["state"] = ACTION
@@ -432,9 +449,9 @@ def mail_action_tools(actions: MailActions) -> list[Tool]:
             return {"subject": item["subject"], "state": state}
         return run
 
-    def confirm(answer: str, position: int | None = None) -> dict:
-        item = actions.confirm_deadline(position or 1, answer == "oui")
-        return {"subject": item["subject"], "confirmed": answer == "oui"}
+    def confirm(answer: str, position: int | None = None, thread: str | None = None) -> dict:
+        item = actions.confirm_deadline(position or 1, answer == "oui", thread)
+        return {"subject": item["subject"], "confirmed": answer == "oui", "reminders": len(item.get("reminders", {}))}
 
     def answer_of(text: str) -> str | None:
         norm = f" {re.sub(r'[^a-z ]', ' ', text.lower())} "
@@ -453,10 +470,13 @@ def mail_action_tools(actions: MailActions) -> list[Tool]:
         Tool("mail_action_waiting", "Note qu'on attend le retour de l'expéditeur pour un dossier de mail.",
              {"position": position}, {"subject": "objet"}, Risk.SAFE, mark(WAITING),
              say=lambda r: f"Entendu : j'attends leur retour pour « {r['subject']} »."),
-        Tool("confirm_mail_deadline", "Confirme ou écarte une échéance estimée dans un mail.",
+        Tool("confirm_mail_deadline", "Accepte ou refuse les rappels d'une échéance trouvée dans un mail.",
              {"position": position, "answer": Param(str, "confirmation", choices=("oui", "non"), hidden=True,
-                                                    resolve=answer_of)},
+                                                    resolve=answer_of),
+              # Dossier de l'annonce (suite proposée après « Voulez-vous que je programme des rappels ? »).
+              "thread": Param(str, "dossier", required=False, hidden=True, max_length=300)},
              {"subject": "objet", "confirmed": "confirmée"}, Risk.SAFE, confirm,
-             say=lambda r: (f"Merci, j'ai programmé les rappels pour « {r['subject']} »." if r["confirmed"]
-                            else f"Entendu, je n'en tiens pas compte pour « {r['subject']} ».")),
+             say=lambda r: (f"C'est noté, monsieur : {r['reminders']} rappel{'s' if r['reminders'] > 1 else ''} "
+                            f"pour « {r['subject']} »." if r["confirmed"]
+                            else f"Entendu, aucun rappel pour « {r['subject']} ».")),
     ]

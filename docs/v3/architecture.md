@@ -1,7 +1,8 @@
 # ORION V3 — architecture
 
 Architecture cible, doublons, interfaces communes et feuille de route : `architecture_cible.md`. Journal
-personnalisé et intégration Google (étude) : `news_personal_intelligence.md`.
+personnalisé et intégration Google (étude) : `news_personal_intelligence.md`. Arbitrages, lots CORE FOUNDATION,
+correctifs V2 à porter et plan du lot F1 : `roadmap.md`.
 
 Branche `v3`, partie du tag `v2.0.0`. **Rien de V3 n'est déployé** : la production reste sur V2. Toute la V3 est
 désactivée par défaut (`enabled = false` dans chaque section). Sans activation explicite, ORION se comporte exactement

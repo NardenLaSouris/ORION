@@ -1,7 +1,7 @@
 # ORION — architecture cible et feuille de route
 
 Audit au 2 novembre 2026. Il compare la vision « assistant conversationnel + agent autonome » au code réellement
-présent :
+présent (arbitrages et feuille de route validée : `roadmap.md`) :
 - `V2` (`c66120f`, en production) ;
 - `v3` (`b74fc49`, jamais déployée).
 
@@ -188,22 +188,21 @@ ENVIRONMENT. Ordre recommandé d'après les dépendances réelles :
 - **Ajouter un module autonome avant l'étape 2.**
 - **Fusionner `v3` dans `main` avant la validation réelle de NEWS et des fondations.**
 
-## 7. Décisions nécessitant un arbitrage humain
+## 7. Décisions arbitrées (2 novembre 2026)
 
-1. **Rôle du NAS :**
-   - sauvegardes des bases ?
-   - stockage des archives et imports ?
-   - modèles ?
+Vos arbitrages sont consignés dans `roadmap.md` : décisions, contradictions relevées et leur résolution, lots
+CORE FOUNDATION (F1 à F5) et leurs dépendances, critères de validation, risques de migration, décisions restantes,
+correctifs V2 à porter et plan d'exécution du lot F1.
 
-   Selon la réponse : sa détection (SENTINEL) et le mode dégradé.
-2. **Ordre ajusté (§ 5),** en particulier les fondations avant tout module autonome, et PROACTIVE avant CONTINUITY.
-3. **Autonomie par défaut :** suspendue au démarrage, ou active ? Et qui peut la réactiver ? Proposition : vous seul,
-   par ORION Control ou la voix authentifiée (propriétaire).
-4. **Capacités autonomes autorisées d'office :** proposition `READ` et `NOTIFY` seulement ; tout le reste par
-   autorisation explicite et bornée.
-5. **Migration des données JSON** vers les trois bases : quand, et avec quelle sauvegarde (proposition : une
-   sauvegarde vérifiée avant chaque migration, ancien fichier gardé 30 jours).
-6. **Synchronisation des branches :** fusion de `V2` dans `v3`, maintenant puis à chaque correctif V2. Aucune fusion
-   n'est automatique.
-7. **Compte système dédié** pour EVOLVE niveau 2 et pour les imports de données personnelles.
-8. **Choix Google** pour NEWS personnel (`news_personal_intelligence.md`, § 9).
+En résumé :
+- **NAS :** stockage externe facultatif (archives, documents, jeux de données, modèles inactifs, sauvegardes
+  chiffrées) ; bases opérationnelles locales ; sa perte n'interrompt jamais le Core.
+- **Ordre :** fondations avant tout module autonome, découpées en F1 à F5 (`roadmap.md`, § 3).
+- **Autonomie :** suspendue par défaut, activée par vous seul ; phase 1 limitée à la lecture, l'analyse et la
+  notification ; interrupteur indépendant de la conversation. Son périmètre exact (origines `module:` et
+  `delegated:`) reste à confirmer.
+- **Migration JSON :** progressive, sauvegardée, vérifiable, idempotente, réversible ; aucun ancien fichier supprimé
+  avant validation complète.
+- **Branches :** aucune fusion automatique ; liste des correctifs V2 à porter dans `roadmap.md`, § 7.
+- **Comptes système :** `orion-import` et `orion-evolve`, sans accès à la clé ni à la base personnelle ; ils déposent
+  dans une zone d'attente que le Core vérifie.

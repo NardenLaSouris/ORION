@@ -179,7 +179,7 @@ Interest
 
 ## 4. Journal quotidien (Daily Briefing Engine)
 
-### Composition (chaque matin, heure réglable, 07:30 proposé)
+### Composition (chaque matin à 07:30, heure réglable)
 
 1. **Candidats :** événements NEWS des dernières 24 heures, ou depuis le précédent journal.
 2. **Exclus :**
@@ -188,9 +188,11 @@ Interest
    - les titres trompeurs : titre à sensation sans source confirmant, ou décalage entre le titre et le résumé (règles,
      puis LLM en confirmation) ;
    - les informations non vérifiées, sauf mention explicite « non confirmé ».
-3. **Score de pertinence :** `importance (NEWS) × 0,6 + correspondance avec vos intérêts × 0,4`. Les poids sont
-   réglables. **Une information « à ne pas manquer »** (niveau alerte de NEWS) entre toujours, même sans lien avec vos
-   intérêts.
+3. **Répartition (décision du 2 novembre) :** 60 % des places pour l'actualité générale, classée par importance
+   (NEWS) ; 40 % pour vos intérêts, classés par correspondance. Les deux listes sont classées séparément, puis les
+   quotas sont appliqués. Ils sont réglables. Tant que le moteur d'intérêts n'existe pas (P1), toutes les places vont à
+   l'actualité générale. **Une information « à ne pas manquer »** (niveau alerte de NEWS) entre toujours, même au-delà
+   du quota.
 4. **Sélection :** de 5 à 10 informations, avec des quotas de diversité. Au plus 3 par rubrique, et au moins une
    « internationale » et une « économie » quand il y en a.
 5. **Rubriques :**
@@ -201,7 +203,8 @@ Interest
    - International ;
    - Économie.
 
-   « Sciences » demande des flux dédiés : nouvelle catégorie `sciences`.
+   « Sciences » (décidée) demande des flux dédiés : nouvelle catégorie `sciences`. International et Économie sont
+   gardées.
 
 ### Fiche de chaque information
 
@@ -236,8 +239,9 @@ Interest
 
 - **Aucune déduction de caractéristique personnelle** : âge, santé, situation, opinions. Le profil ne contient que des
   sujets.
-- **Interactions :** stockées dans la base personnelle, avec une durée de conservation réglable (180 jours par
-  défaut).
+- **Interactions :** stockées dans la base personnelle, 180 jours (décidé, réglable). Au-delà, seules restent des
+  tendances agrégées : intérêt, poids, période, type de source. La provenance est gardée au niveau du résumé, et les
+  agrégats restent consultables, corrigeables et supprimables.
 
 ## 6. Sécurité et confidentialité
 
@@ -281,13 +285,18 @@ Rien n'est demandé tant que vous n'avez pas choisi.
 | + mise à jour automatique | `dataportability.myactivity.search`, `dataportability.myactivity.youtube` | idem, et activer la Data Portability API dans le projet |
 | Agenda par API | `calendar.events.readonly` | non recommandé : l'ICS fonctionne déjà |
 
-## 9. Décisions à prendre
+## 9. Décisions prises (2 novembre 2026)
 
-1. Voie d'accès aux historiques : Takeout seul, ou Takeout puis Data Portability.
-2. YouTube par API (`youtube.readonly`) : oui ou non.
-3. Conservation de l'archive brute après import (non par défaut) et durée de conservation des interactions (180 jours
-   proposés).
-4. Heure du journal (07:30 proposé) et poids importance / intérêts (0,6 / 0,4).
-5. Liste des flux, y compris sciences, et leur fiabilité.
-6. Création de la clé `ORION_DATA_KEY` (dans `.env`, par vous ou par une commande fournie).
-7. Fusion de `V2` dans `v3`, pour y récupérer les correctifs du 2 novembre, avant de commencer P1.
+Le détail est dans `roadmap.md`.
+
+1. **Accès :** Takeout d'abord, Data Portability API plus tard, YouTube API secondaire. Aucun accès Google réel sans
+   votre validation explicite ; ni scraping ni contournement des API.
+2. **Archive brute :** supprimée après « import vérifié » (définition : `roadmap.md`, § 2.8). Elle ne va jamais sur le
+   NAS. Elle est traitée par le compte `orion-import`, qui dépose les faits minimisés dans une zone d'attente
+   vérifiée par le Core.
+3. **Interactions :** 180 jours, puis agrégats seulement ; provenance et date conservées.
+4. **Journal :** 07:30 ; 60 % général / 40 % intérêts ; rubrique Sciences ; tout réglable.
+5. **`ORION_DATA_KEY` :** hors du dépôt et du `.env`. Elle est fournie au service par `LoadCredential=` depuis
+   `/etc/orion/credentials/` (root, 600). Elle est versionnée pour la rotation, sauvegardée hors ligne et jamais à
+   côté des sauvegardes chiffrées. Aucune clé réelle avant votre validation : clés factices en test.
+6. **Reste à fixer :** la liste exacte des flux, sciences comprises, et leur fiabilité, avant l'essai réel de P1.

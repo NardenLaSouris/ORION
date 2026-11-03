@@ -625,6 +625,70 @@
     });
   }
 
+  // Frag Factory : supervision de l'atelier de clips (le travail reste dans Frag Factory, sur le PC).
+  async function fragfactoryView() {
+    await moduleView("Frag Factory", "fragfactory", async (status) => {
+      const [settings, events, reports, actions, alerts] = await Promise.all([mod("fragfactory", "/settings"),
+        mod("fragfactory", "/events"), mod("fragfactory", "/reports"), mod("fragfactory", "/actions"),
+        mod("fragfactory", "/alerts")]);
+      let pending = null, pendingError = "";
+      try { pending = await mod("fragfactory", "/pending"); } catch (error) { pendingError = error.message; }
+      const refresh = () => show("fragfactory");
+      const TIERS = [["pepite", "Pépites"], ["bon", "Bons clips"], ["a_trier", "À trier"]];
+      const TIER_LABEL = { pepite: "Pépite", bon: "Bon clip", a_trier: "À trier" };
+      const iso = (text) => text ? new Date(text).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
+      const STATUS = { PENDING_REVIEW: "à valider", APPROVED: "validé", REJECTED: "refusé",
+        REVISION_REQUESTED: "à retravailler", PUBLISHED: "publié" };
+      const reportTime = el("input", { type: "text", value: settings.report_time, style: "width:5em" });
+      const reportOn = el("input", { type: "checkbox", checked: settings.report_enabled });
+      const voiceOn = el("input", { type: "checkbox", checked: settings.voice_enabled });
+      const writtenOn = el("input", { type: "checkbox", checked: settings.written_enabled });
+      const failuresOn = el("input", { type: "checkbox", checked: settings.announce_failures });
+      const poll = el("input", { type: "number", min: 10, max: 3600, value: settings.poll_seconds, style: "width:6em" });
+      const tiers = TIERS.map(([k, label]) => [k, el("input", { type: "checkbox", checked: settings.notify_tiers.includes(k) }), label]);
+      const save = () => act(mod("fragfactory", "/settings", "PUT", {
+        report_time: reportTime.value.trim(), report_enabled: reportOn.checked, voice_enabled: voiceOn.checked,
+        written_enabled: writtenOn.checked, announce_failures: failuresOn.checked, poll_seconds: Number(poll.value),
+        notify_tiers: tiers.filter(([, box]) => box.checked).map(([k]) => k),
+      }), "Réglages enregistrés.").then(refresh);
+      const last = status.last_sync || {};
+      view.replaceChildren(
+        el("h1", {}, "Frag Factory"),
+        cards([["Liaison", status.connected ? "connectée" : "injoignable", status.error || `dernier échange : ${stamp(status.last_contact)}`],
+          ["Dernière synchronisation", stamp(status.last_sync_at), last.received !== undefined ? `${last.received} événement(s), ${last.new} nouveau(x)` : ""],
+          ["Événements reçus", status.events_received, `curseur ${status.cursor}`],
+          ["Dernier bilan", status.last_report ? status.last_report.day : "aucun", `chaque jour à ${settings.report_time}`]]),
+        el("div", { class: "toolbar" }, button("Synchroniser maintenant", () => act(mod("fragfactory", "/sync", "POST"), "Synchronisé.").then(refresh))),
+        el("h2", {}, "Clips à valider"),
+        pending ? table(["Clip", "Niveau", "Durée", "Résumé"], (pending.items || []).map((c) => [c.title, TIER_LABEL[c.tier] || c.tier,
+          `${Math.round(c.duration_s)} s`, c.summary || "—"]), "Aucun clip n'attend votre validation.")
+          : el("div", { class: "banner" }, `Frag Factory ne répond pas : ${pendingError}`),
+        el("p", { class: "muted small" }, "Valider ou refuser : à la voix (« valide le dernier clip ») ou dans Frag Factory. "
+          + "La publication ne se fait jamais depuis ORION."),
+        el("h2", {}, "Réglages"),
+        el("div", { class: "list" },
+          el("div", { class: "row" }, el("label", {}, reportOn, " bilan quotidien à "), reportTime),
+          el("div", { class: "row" }, "Annoncer : ", tiers.map(([, box, label]) => el("label", {}, box, ` ${label} `))),
+          el("div", { class: "row" }, el("label", {}, voiceOn, " voix "), el("label", {}, writtenOn, " message écrit "),
+            el("label", {}, failuresOn, " échecs de traitement ")),
+          el("label", { class: "row" }, "Synchronisation toutes les (s) ", poll),
+          button("Enregistrer", save, "primary")),
+        el("p", { class: "muted small" }, "Les annonces suivent les règles communes d'ORION : présence, heures calmes, "
+          + "pas d'appel. Plusieurs clips arrivés ensemble font une seule annonce."),
+        el("h2", {}, "Bilans"),
+        table(["Jour", "Période", "Canaux", "Texte"], reports.map((r) => [r.day, `${iso(r.period_start)} → ${iso(r.period_end)}`,
+          JSON.parse(r.channels || "[]").join(", ") || "gardé", r.spoken])),
+        el("h2", {}, "Décisions transmises"),
+        table(["Heure", "Action", "Clip", "Issue"], actions.map((a) => [stamp(a.at), a.action, `#${a.clip_id}`, a.outcome])),
+        el("h2", {}, "Annonces"),
+        table(["Heure", "Titre", "Canaux", "Non envoyé"], alerts.map((a) => [stamp(a.at), a.title, a.channels.join(", ") || "—",
+          Object.entries(a.skipped).map(([k, v]) => `${k} : ${v}`).join(" ; ")])),
+        el("h2", {}, "Événements reçus"),
+        table(["Reçu", "Type", "Ressource", "Titre", "Annonce"], events.map((e) => [stamp(e.received_at),
+          e.type.replace("fragfactory.", ""), e.resource_id, e.title || "—", e.announced || "—"])));
+    });
+  }
+
   async function evolveView() {
     await moduleView("Évolution", "evolve", async (status) => {
       const [anomalies, patches, proposals, history] = await Promise.all([mod("evolve", "/anomalies"),
@@ -850,7 +914,7 @@
 
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
     news: newsView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView,
-    autonomy: autonomyView };
+    autonomy: autonomyView, fragfactory: fragfactoryView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],
     ["visage", "Comme le visage d'ORION (sa couleur du moment)"], ["jarvis", "ORION (jour)"],

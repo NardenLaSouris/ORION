@@ -606,3 +606,14 @@ level = 1
 enabled = false
 level = 1
 sandbox = true
+
+# Frag Factory (clips CS2 produits sur le PC fixe, docs/v3/fragfactory.md) : supervision, annonces des nouveaux clips,
+# validation vocale confirmée, bilan du matin. Inactif par défaut. ORION passe par l'agent Windows du PC (aucun port
+# de Frag Factory ouvert sur le réseau) ; heure du bilan, canaux et paliers se règlent ensuite dans ORION Control.
+[fragfactory]
+enabled = false
+device = ""            # appareil de [tools.devices] qui héberge Frag Factory ; vide : l'appareil par défaut
+poll_seconds = 30
+report_time = "08:00"
+timezone = "Europe/Paris"
+notify_tiers = ["pepite", "bon"]

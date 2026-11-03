@@ -354,11 +354,10 @@ class WallpaperConfig:
     # coupées par défaut : Wallpaper Engine ne transmet pas le clavier au fond d'écran.
     actions: bool = True
     chat: bool = False
-    # Coût de production estimé (orion/wallpaper/project.py) : tokens relevés par scripts/production_stats.py, et
-    # travail d'un développeur au rythme de dev_lines_per_day lignes de code testées et documentées par jour.
+    # Coût de production (orion/wallpaper/project.py) : tokens et heures de travail relevés par
+    # scripts/production_stats.py, heures payées au taux d'un développeur à dev_net_monthly euros nets par mois.
     production_stats: Path = Path("data/production_stats.json")
     dev_net_monthly: float = 3000.0  # salaire net mensuel d'un développeur Python confirmé (France)
-    dev_lines_per_day: float = 200.0
     usd_eur: float = 0.9  # conversion du coût des tokens (tarif en dollars)
 
 
@@ -464,6 +463,15 @@ class EvolveConfig:
 
 
 @dataclass(frozen=True)
+class SentinelConfig:
+    """SENTINEL (docs/v3/sentinel.md) : santé d'ORION et de ses ressources, lecture seule. Exige [platform]."""
+    enabled: bool = False
+    probe_seconds: float = 60.0
+    history_days: int = 7
+    notify_after_seconds: float = 120.0  # panne annoncée seulement au-delà (pas de bruit pour une micro-coupure)
+
+
+@dataclass(frozen=True)
 class PurchaseConfig:
     enabled: bool = False
     level: int = 1  # 1 : ORION prépare et demande confirmation ; 2 et 3 : activation explicite (voir orion/purchase)
@@ -526,6 +534,7 @@ class Config:
     news: NewsConfig = NewsConfig()
     evolve: EvolveConfig = EvolveConfig()
     purchase: PurchaseConfig = PurchaseConfig()
+    sentinel: SentinelConfig = SentinelConfig()
     fragfactory: FragFactoryConfig = FragFactoryConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
@@ -657,6 +666,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "watch": WatchConfig,
         "news": NewsConfig,
         "evolve": EvolveConfig,
+        "sentinel": SentinelConfig,
         "purchase": PurchaseConfig,
         "fragfactory": FragFactoryConfig,
     }

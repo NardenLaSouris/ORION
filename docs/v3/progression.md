@@ -49,6 +49,9 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 | 13:30 | F5 : service de ressources, tâches lourdes différées, zones d'attente, script des comptes (non installé) | `3c2bdbf` | 2309 | oui, vérifié |
 | 14:00 | NEWS : « approfondis la deuxième », « et la dernière ? » (numéro lu dans les mots, relances) | `5564420` | 2318 | oui, vérifié |
 | 15:20 | Fond d'écran : poids d'ORION et coût de production estimé (demande du propriétaire) | `d467fb0` | 2323 | oui, vérifié à 1920×1080 |
+| 16:10 | Coût de production en heures réellement travaillées ; report en production V2 (`15621a0`) avec l'accord du propriétaire | `f8a3462` | 2323 | oui (et production) |
+| 17:45 | SENTINEL : santé, historique 7 jours, incidents levés sans intervention (`sentinel.md`) | `eee02a7` | 2331 | oui, vérifié |
+| 17:50 | Questions vers les outils V3 en lecture seule ; « quelles sont les actualités ? » donne le journal | `753356f` | 2340 | oui, vérifié |
 
 **En attente du propriétaire :**
 - `sudo bash /home/user/orion-v3/deploy/v3_isolation.sh` (règles réseau et limites de ressources de la V3) ;
@@ -57,10 +60,13 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 - création d'une vraie clé de données personnelles (F4), seulement s'il le décide ;
 - inventaire Takeout, quand l'export sera déposé.
 
+**À chaque déploiement** (V3, et production quand elle est concernée) : relevé des tokens et des heures
+(`python scripts/production_stats.py`), copié dans `data/production_stats.json` de l'environnement.
+
 ## Prochain chantier
 
-1. Relevé des tokens à rafraîchir : `python scripts/production_stats.py --out <fichier>` sur le PC, puis copie dans
-   `/opt/orion-v3/data/production_stats.json` (fait à chaque déploiement ; automatisation à décider).
+1. KNOWLEDGE (étape 4) : modèle commun des connaissances personnelles sur la base chiffrée (F4), avec des clés
+   factices ; aucune donnée réelle tant que la vraie clé et l'import ne sont pas décidés.
 2. Essai réel du journal pendant une semaine dans V3 ; réglages d'après les journaux obtenus.
 3. Ensuite, selon les dépendances de la feuille de route : KNOWLEDGE (P2, base personnelle) une fois la clé décidée ;
    MISSIONS (F1, F2).

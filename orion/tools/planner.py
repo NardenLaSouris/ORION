@@ -207,6 +207,9 @@ def planner_prompt(registry: ToolRegistry) -> str:
         rules.append("- « Le journal », « les nouvelles du jour », « mon journal » : news_briefing. « Approfondis / "
                      "détaille la deuxième », « parle-moi de l'info sur… » : news_more (sujet seulement si la demande nomme un "
                      "sujet ; le numéro est lu dans la demande).")
+    if registry.exists("sentinel_status"):
+        rules.append("- « Comment va le système / ORION ? », « tout fonctionne ? », « le Katana répond ? » : "
+                     "sentinel_status.")
     if registry.exists("fragfactory_status"):
         rules.append("- Frag Factory (clips CS2) : état -> fragfactory_status ; « quels clips / mes meilleurs clips / "
                      "retrouve le clip… » -> fragfactory_list_clips ; « qu'est-ce qui attend ma validation », « combien "
@@ -418,6 +421,8 @@ DOMAIN_WORDS = {
     "news_bulletin": ("actualite", "actualites", "actu", "actus", "infos", "informations", "nouvelles", "bulletin",
                       "journal", "news"),
     "news_briefing": ("journal", "nouvelles du jour", "actualite", "actualites", "infos", "news"),
+    "sentinel_status": ("systeme", "fonctionne", "fonctionnent", "marche", "katana", "sante", "panne", "pannes",
+                        "incident", "incidents"),
     "news_more": ("approfondis", "approfondir", "detaille", "details", "parle moi", "premiere", "deuxieme",
                   "troisieme", "quatrieme", "cinquieme", "info", "information", "numero"),
     # Frag Factory (V3) : chaque outil exige un mot de son domaine dans la demande.
@@ -487,6 +492,8 @@ DEFERRED_TOOLS = ("create_reminder", "cancel_reminder", "cancel_all_reminders", 
 
 READ_ONLY_TOOLS = ("get_", "list_", "light_status", "find_", "read_", "recall", "search_", "next_", "free_",
                    "system_info", "network_status", "spotify_status", "check_mail", "summarize_mail",
+                   # V3, lecture seule : actualités (bulletin, journal, fiche), santé, notifications manquées
+                   "news_", "sentinel_status", "missed_notifications",
                    # Frag Factory : lecture et conseil (une question ne déclenche jamais une validation ni un rendu)
                    "fragfactory_status", "fragfactory_list_", "fragfactory_get_", "fragfactory_play_clip",
                    "fragfactory_analyze_clip_style", "fragfactory_recommend_editing_style")

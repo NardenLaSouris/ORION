@@ -912,8 +912,30 @@
     held: "à confirmer", done: "faite",
     failed: "en échec", expired: "expirée", cancelled: "annulée", interrupted: "interrompue" };
 
+  async function sentinelView() {
+    await moduleView("Santé", "sentinel", async (status) => {
+      const incidents = await mod("sentinel", "/incidents");
+      const refresh = () => show("sentinel");
+      const pct = (v) => v === null || v === undefined ? "—" : `${String(v).replace(".", ",")} %`;
+      view.replaceChildren(
+        el("h1", {}, "Santé"),
+        cards([["Incidents en cours", status.open_incidents.length, status.open_incidents.map((i) => i.label).join(", ") || "aucun"],
+          ["Incidents (7 jours)", status.incidents_7d], ["Tâches lourdes", status.busy ? "différées" : "permises", status.busy || ""]]),
+        el("div", { class: "toolbar" }, button("Vérifier maintenant", () => act(mod("sentinel", "/probe", "POST"), "Vérification faite.").then(refresh))),
+        el("h2", {}, "Ressources"),
+        table(["Ressource", "État", "Depuis", "Disponibilité (7 j)", "Sans elle"], status.resources.map((r) => [r.label,
+          r.available === null ? "jamais vérifiée" : r.available ? "disponible" : `indisponible — ${r.detail}`,
+          stamp(r.since), r.detail === "non configuré" ? "non configurée" : pct(r.availability_7d),
+          r.without.map((w) => `${w.module} : ${w.behaviour}`).join(" · ") || "—"])),
+        el("h2", {}, "Incidents"),
+        table(["Ressource", "Début", "Durée", "État", "Annoncé"], incidents.map((i) => [i.label, stamp(i.started_at),
+          `${Math.max(1, Math.round(i.duration / 60))} min`, i.open ? "en cours" : i.recovery, i.notified ? "oui" : "non"]),
+          "Aucun incident sur 7 jours."));
+    });
+  }
+
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
-    news: newsView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView,
+    news: newsView, sentinel: sentinelView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView,
     autonomy: autonomyView, fragfactory: fragfactoryView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],

@@ -178,6 +178,9 @@ url = "https://www.francetvinfo.fr/politique.rss"
 category = "france"
 reliability = "media"
 
+[sentinel]
+enabled = true
+
 [evolve]
 enabled = true
 

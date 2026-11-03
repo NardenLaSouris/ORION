@@ -2,11 +2,11 @@
 
 - **Poids** : tout ce qu'occupe l'installation (code, environnement Python, modèles, données), parcouru au plus une
   fois par heure.
-- **Coût de production**, deux parts, toutes deux des estimations :
+- **Coût de production**, deux parts :
   - IA : tokens des sessions de développement (``scripts/production_stats.py``, fichier ``production_stats.json``)
     au tarif public par million de tokens ;
-  - travail : lignes de code et de tests du dépôt, au rythme d'un développeur qui les écrit, les teste et les
-    documente (``dev_lines_per_day``), payé ``dev_net_monthly`` euros nets par mois (21 jours travaillés).
+  - travail : les heures réellement passées sur ORION dans ces sessions (temps actif relevé par le même script), au
+    taux horaire d'un développeur payé ``dev_net_monthly`` euros nets par mois (151,67 h).
 """
 
 from __future__ import annotations
@@ -21,9 +21,7 @@ from typing import Callable
 PRICES = {"claude-opus-5-5": (4.0, 20.0, 0.20), "claude-opus-5": (5.0, 25.0, 0.50), "claude-opus-4-8": (5.0, 25.0, 0.50),
           "claude-sonnet-5-5": (2.0, 10.0, 0.20), "claude-sonnet-5": (2.0, 10.0, 0.20),
           "claude-haiku-5-5": (0.10, 0.50, 0.01), "claude-fable-5-1": (10.0, 50.0, 0.25)}
-CODE = {".py", ".js", ".html", ".css"}
-SKIP = {".git", ".venv", "venv", "models", "data", "node_modules", "__pycache__", ".pytest_cache"}
-WORKING_DAYS = 21
+MONTHLY_HOURS = 151.67  # durée légale mensuelle (35 h par semaine)
 
 
 def footprint(root: Path) -> dict:
@@ -49,20 +47,6 @@ def _size(entry: os.DirEntry) -> int:
     return 0
 
 
-def code_lines(root: Path) -> int:
-    total = 0
-    for folder, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in SKIP]
-        for name in files:
-            if Path(name).suffix in CODE:
-                try:
-                    with open(Path(folder) / name, "rb") as handle:
-                        total += sum(1 for line in handle if line.strip())
-                except OSError:
-                    pass
-    return total
-
-
 def ai_cost(stats: dict) -> float:
     """Coût en dollars des tokens relevés par ``production_stats.py``."""
     total = 0.0
@@ -76,21 +60,18 @@ def ai_cost(stats: dict) -> float:
     return total
 
 
-def project_source(root: Path, stats_path: Path, net_monthly: float, lines_per_day: float,
-                   usd_eur: float) -> Callable[[], dict]:
+def project_source(root: Path, stats_path: Path, net_monthly: float, usd_eur: float) -> Callable[[], dict]:
     def read() -> dict:
         parts = footprint(root)
-        lines = code_lines(root)
-        days = lines / max(1.0, lines_per_day)
-        labour = days * net_monthly / WORKING_DAYS
         try:
             stats = json.loads(Path(stats_path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             stats = {}
+        hours = float(stats.get("active_hours") or 0.0)
+        labour = hours * net_monthly / MONTHLY_HOURS
         ai_usd = ai_cost(stats)
         tokens = sum(sum(v for k, v in t.items() if k != "responses") for t in (stats.get("models") or {}).values())
-        return {"size": sum(parts.values()), "parts": parts, "lines": lines, "dev_days": round(days),
-                "labour_eur": round(labour), "ai_usd": round(ai_usd), "tokens": tokens,
-                "active_hours": stats.get("active_hours"), "since": stats.get("first"),
+        return {"size": sum(parts.values()), "parts": parts, "hours": round(hours, 1), "labour_eur": round(labour),
+                "ai_usd": round(ai_usd), "tokens": tokens, "since": stats.get("first"),
                 "total_eur": round(labour + ai_usd * usd_eur), "net_monthly": net_monthly}
     return read

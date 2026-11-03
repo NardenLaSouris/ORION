@@ -33,7 +33,7 @@ DATA_CLASSES = {
     "ledger": OPERATIONAL, "autonomy": OPERATIONAL, "grants": OPERATIONAL, "confirmations": OPERATIONAL,
     "tasks": OPERATIONAL, "events": OPERATIONAL,
     "history": PUBLIC, "alerts": PUBLIC, "news": PUBLIC, "price_history": PUBLIC, "event_calendar": PUBLIC,
-    "watch": PUBLIC, "evolve": PUBLIC, "purchase": PUBLIC,
+    "watch": PUBLIC, "evolve": PUBLIC, "purchase": PUBLIC, "sentinel": PUBLIC,
     "fragfactory": PUBLIC,  # identifiants de clips et métadonnées courtes ; vidéos et analyses restent chez Frag Factory
     "personal": PERSONAL,
 }

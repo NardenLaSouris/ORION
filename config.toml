@@ -516,9 +516,8 @@ actions = true
 chat = false
 # Poids d'ORION et coût de production estimé (panneau « Cœur ») : tokens des sessions de développement relevés par
 # `python scripts/production_stats.py --out data/production_stats.json` (sur le PC où tournent ces sessions), et
-# travail d'un développeur : lignes de code et de tests / dev_lines_per_day, au salaire net dev_net_monthly.
+# heures réellement travaillées sur ORION dans ces sessions, au taux horaire d'un salaire net dev_net_monthly.
 dev_net_monthly = 3000.0
-dev_lines_per_day = 200.0
 usd_eur = 0.9
 
 [face]
@@ -600,6 +599,13 @@ journal_enabled = true
 [evolve]
 enabled = false
 level = 1
+
+# Santé d'ORION et de ses ressources (docs/v3/sentinel.md) : lecture seule ; exige [platform].
+[sentinel]
+enabled = false
+probe_seconds = 60.0
+history_days = 7
+notify_after_seconds = 120.0
 
 # Achats sous mandat (docs/v3/purchase.md) : bac à sable seulement, niveau 1 (confirmation) par défaut.
 [purchase]

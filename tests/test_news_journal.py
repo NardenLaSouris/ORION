@@ -232,3 +232,14 @@ def test_a_follow_up_takes_the_number_from_its_own_words():
     carried = {"type": "tool_call", "tool": "news_more", "parameters": {"numero": 2}}
     assert agent._with_hidden(carried, "Et la dernière ?")["parameters"]["numero"] == -1
     assert agent._with_hidden(carried, "Et encore ?")["parameters"]["numero"] == 2  # rien de nouveau : gardé
+
+
+@pytest.mark.parametrize("text, general", [
+    ("Quelles sont les actualités ?", True), ("Les infos du jour", True), ("quoi de neuf ?", True),
+    ("Dis-moi les dernières nouvelles", True), ("Quelles sont les principales actualités aujourd'hui ?", True),
+    ("Quelles sont les actualités sur la Chine ?", False), ("Les infos sur le match de ce soir", False),
+    ("Quel temps fait-il ?", False)])
+def test_a_general_news_question_goes_to_the_journal_and_a_precise_one_to_the_web(text, general):
+    from orion.agent import general_news
+
+    assert general_news(text) is general

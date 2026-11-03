@@ -61,13 +61,14 @@ healthy() {
   for _ in $(seq 1 45); do
     sleep 2
     systemctl is-active --quiet "$SERVICE" || continue
-    if journalctl -u "$SERVICE" --since "$since" --no-pager -q 2>/dev/null | grep -q "Traceback"; then
-      return 1
-    fi
-    if journalctl -u "$SERVICE" --since "$since" --no-pager -q 2>/dev/null | grep -q "ORION prêt\|Modules V3 activés" \
-        && [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:8865/)" = 200 ]; then
-      return 0
-    fi
+    # Journal lu une fois : « journalctl | grep -q » échoue sous pipefail (SIGPIPE) dès que grep a trouvé.
+    local journal
+    journal=$(journalctl -u "$SERVICE" --since "$since" --no-pager -q 2>/dev/null || true)
+    case "$journal" in *Traceback*) return 1 ;; esac
+    case "$journal" in
+      *"Modules V3 activés"*)
+        [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:8865/)" = 200 ] && return 0 ;;
+    esac
   done
   return 1
 }

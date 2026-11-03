@@ -56,6 +56,7 @@ ACTION_CLAIMS = (
     re.compile(r"\bje (peux|pourrai|vais pouvoir) (vous )?(programmer|allumer|eteindre|envoyer|lancer|ouvrir|"
                r"regler|mettre|rappeler|reveiller|noter|enregistrer)\b"),
     re.compile(r"\bje (vais|m en vais) (vous )?(allumer|eteindre|envoyer|regler|mettre|lancer|ouvrir|fermer|baisser|"
+               r"produire|valider|refuser|generer|rejoindre|quitter|demuter|muter|"
                r"monter|augmenter|verrouiller|reveiller|rappeler|programmer|couper|supprimer|redemarrer|jouer|"
                r"effacer|annuler|creer|ajouter)\b"),
     # Session QA : « Je vais verrouiller l'ordinateur », « Je vous réveillerai à 25 heures », « J'ouvre Without

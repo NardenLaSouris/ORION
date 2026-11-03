@@ -298,6 +298,18 @@ def fragfactory_tools(engine: FragFactoryModule) -> list[Tool]:
     items = Param(list, "ce qui manque au clip", required=False, hidden=True, resolve=rework_items, reread=True)
     note = Param(str, "ce qui manque, avec les mots de la demande", required=False, max_length=300)
     proposal = Param(int, "numéro de la proposition de montage", required=False, minimum=1, maximum=3)
+
+    def proposed_reference(text: str):
+        """« Produis la version 1 » ne nomme pas le clip : c'est celui de la proposition qui vient d'être faite."""
+        said = references.reference(text)
+        if said:
+            return said
+        saved = engine._fresh("proposals") or {}  # noqa: SLF001
+        return f"id:{saved['clip_id']}" if saved.get("clip_id") else None
+
+    proposed_clip = Param(str, "clip désigné par la demande, sinon celui de la proposition", required=True,
+                          max_length=80, hidden=True, resolve=proposed_reference, reread=True,
+                          evidence=references.evidence, check=lambda ref: engine.resolve(ref))
     say = lambda r: r["text"]  # noqa: E731
     return [
         Tool("fragfactory_status", "État de Frag Factory : traitements en cours, file, clips à valider.", {},
@@ -334,7 +346,7 @@ def fragfactory_tools(engine: FragFactoryModule) -> list[Tool]:
              Risk.CONFIRMATION_REQUIRED, revision, question=_question("Je demande une retouche de"), say=say,
              capability="WRITE_DATA"),
         Tool("fragfactory_request_render", "Produit une nouvelle version d'un clip à partir d'une proposition de "
-             "montage faite juste avant.", {"clip": clip_param(False), "proposition": proposal},
+             "montage faite juste avant.", {"clip": proposed_clip, "proposition": proposal},
              {"text": "rendu lancé"}, Risk.CONFIRMATION_REQUIRED, render, question=render_question, say=say,
              capability="WRITE_DATA"),
     ]

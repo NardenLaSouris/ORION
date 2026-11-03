@@ -671,3 +671,28 @@ def test_a_claimed_validation_without_tool_is_caught():
     assert claims_action("Votre micro est coupé.")
     assert not claims_action("Le clip n'a pas été validé.")
     assert not claims_action("Le match a été annulé à cause de la pluie.")  # actualité : pas une action d'ORION
+
+
+def test_produce_version_one_takes_the_clip_of_the_proposal_just_made():
+    """« Produis la version 1 » juste après « quel montage tu ferais pour le clip 5 ? » : pas de clip dans la
+    demande, c'est celui de la proposition (essai réel du 4 novembre : « il me manque une précision »)."""
+    w = World()
+    w.ff.clips[5] = clip(5, "Le teamkill de trop", status="APPROVED")
+    w.ask("fragfactory_recommend_editing_style", "quel montage nerveux tu ferais pour le clip numéro 5 ?")
+    out = w.ask("fragfactory_request_render", "Produis la version 1.", proposition=1)
+    assert out.status == CONFIRM and "Version nerveuse" in out.question
+    assert w.core.answer("oui").status == DONE
+    assert w.ff.versions[0]["overrides"] == {"layout": "crop_killfeed"}
+
+
+def test_without_a_proposal_produce_version_one_names_no_clip_and_does_nothing():
+    w = World()
+    w.ff.clips[5] = clip(5, "Le teamkill de trop", status="APPROVED")
+    out = w.ask("fragfactory_request_render", "Produis la version 1.", proposition=1)
+    assert out.status != DONE and not w.ff.versions
+
+
+def test_promised_production_without_tool_is_caught():
+    from orion.router import claims_action
+
+    assert claims_action("Je vais produire la version 1, monsieur.")

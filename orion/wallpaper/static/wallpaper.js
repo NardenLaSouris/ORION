@@ -227,11 +227,11 @@ function render(stats) {
       data: "données", history: "historique Git" }[k] || k} ${(v / 1e9).toFixed(2).replace(".", ",")} Go`).join(" · ");
     const euros = (n) => `${Math.round(n).toLocaleString("fr-FR")} €`;
     const cost = $("orion-cost");
+    const hours = Math.round(project.hours).toLocaleString("fr-FR");
     cost.textContent = `≈ ${euros(project.total_eur)} · IA ${Math.round(project.ai_usd).toLocaleString("fr-FR")} $ · `
-      + `${project.dev_days} j de dev`;
-    cost.title = `IA : ${Math.round(project.ai_usd).toLocaleString("fr-FR")} $ (${(project.tokens / 1e9).toFixed(1).replace(".", ",")} G tokens, `
-      + `${project.active_hours ?? "?"} h de sessions) · développeur : ${euros(project.labour_eur)} `
-      + `(${project.dev_days} jours pour ${project.lines.toLocaleString("fr-FR")} lignes, ${euros(project.net_monthly)} net/mois)`;
+      + `${hours} h de travail`;
+    cost.title = `IA : ${(project.tokens / 1e9).toFixed(1).replace(".", ",")} milliards de tokens · travail : ${hours} h `
+      + `à ${euros(project.net_monthly)} net/mois (${euros(project.labour_eur)})`;
   }
   const pcs = val(stats, "pcs");
   if (pcs) $("pcs").innerHTML = pcs.map((m, i) => machine(m).replace('<div class="machine',

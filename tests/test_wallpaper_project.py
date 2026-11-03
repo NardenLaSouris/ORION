@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from orion.wallpaper.project import ai_cost, code_lines, footprint, project_source  # noqa: E402
+from orion.wallpaper.project import ai_cost, footprint, project_source  # noqa: E402
 from scripts.production_stats import collect  # noqa: E402
 
 
@@ -24,11 +24,9 @@ def fake_install(tmp_path):
     return tmp_path
 
 
-def test_footprint_by_part_and_code_lines_ignore_environment_and_models(tmp_path):
-    root = fake_install(tmp_path)
-    parts = footprint(root)
+def test_footprint_by_part(tmp_path):
+    parts = footprint(fake_install(tmp_path))
     assert parts["python"] == 1000 and parts["models"] == 5000 and parts["code"] == 13
-    assert code_lines(root) == 2  # lignes non vides, code seulement
 
 
 def test_ai_cost_uses_public_prices_and_skips_synthetic_responses():
@@ -39,15 +37,15 @@ def test_ai_cost_uses_public_prices_and_skips_synthetic_responses():
     assert round(ai_cost(stats), 2) == round(4 + 20 + 0.2 + 5 + 8, 2)
 
 
-def test_estimate_combines_labour_and_tokens(tmp_path):
+def test_labour_is_the_hours_really_worked_at_a_developer_net_rate(tmp_path):
     root = fake_install(tmp_path)
     stats = tmp_path / "stats.json"
-    stats.write_text(json.dumps({"models": {"claude-opus-5-5": {"output_tokens": 50_000}}, "active_hours": 3}),
+    stats.write_text(json.dumps({"models": {"claude-opus-5-5": {"output_tokens": 50_000}}, "active_hours": 10}),
                      encoding="utf-8")
-    result = project_source(root, stats, 2100, 1, 1.0)()
-    assert result["dev_days"] == 2 and result["labour_eur"] == 200 and result["ai_usd"] == 1
-    assert result["total_eur"] == 201 and result["active_hours"] == 3
-    assert project_source(root, tmp_path / "absent.json", 2100, 1, 1.0)()["ai_usd"] == 0  # sans relevé : travail seul
+    result = project_source(root, stats, 1516.7, 1.0)()
+    assert result["hours"] == 10 and result["labour_eur"] == 100 and result["ai_usd"] == 1
+    assert result["total_eur"] == 101
+    assert project_source(root, tmp_path / "absent.json", 1516.7, 1.0)()["total_eur"] == 0  # sans relevé : rien
 
 
 def test_token_collection_counts_each_response_once_and_keeps_no_text(tmp_path):

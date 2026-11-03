@@ -216,5 +216,5 @@ def build_sources(cfg, *, llm=None, stt=None, devices=None, presence=None, weath
 
     w = cfg.wallpaper  # poids d'ORION et coût de production : recalculés une fois par heure
     sources.append(Source("project", 3600.0, project_source(Path(__file__).resolve().parents[2], w.production_stats,
-                                                             w.dev_net_monthly, w.dev_lines_per_day, w.usd_eur)))
+                                                             w.dev_net_monthly, w.usd_eur)))
     return sources

@@ -5,20 +5,23 @@ chaque clip prêt, fait valider à la voix (avec confirmation), donne le bilan d
 style ou de nouvelle version. **Tout le travail éditorial reste dans Frag Factory** ; ORION ne stocke ni vidéo ni
 moteur de montage, seulement des événements et des fiches.
 
-Branche de travail : `feature/fragfactory`, partie de `v3` à `234c5c5`. Non fusionnée, non déployée.
+Fusionné dans `v3` le 3 novembre 2026. Le 4 novembre, l'intégration a été **migrée vers l'agent Windows V3** (port
+8875, jeton `ORION_V3_AGENT_TOKEN`) : plus aucune dépendance à l'agent ni au jeton de la production. Elle est
+déployée dans la V3 et reliée à une **instance d'essai** de Frag Factory, aux données fictives (§ 8).
 
 ## 1. Chemin des données
 
 ```
-Frag Factory (127.0.0.1:8742)        Agent Windows (PC fixe)              Core ORION (mini-PC)
+Frag Factory (127.0.0.1:8742)        Agent Windows V3 (PC fixe, 8875)      Core ORION (mini-PC)
   /api/integration/v1        <──  action « fragfactory »          <──  module « fragfactory »
   file d'événements (outbox)     boucle locale, jeton de liaison       POST /actions/fragfactory
-  décisions, versions, bilans    opérations en liste fermée            (IP autorisées + ORION_AGENT_TOKEN)
+  décisions, versions, bilans    opérations en liste fermée            (IP autorisée + ORION_V3_AGENT_TOKEN)
 ```
 
 - Aucun port de Frag Factory n'est ouvert sur le réseau : seul l'agent, sur la même machine, l'appelle.
 - **Tirage + accusé** : ORION lit les événements, les enregistre, puis acquitte. ORION arrêté : rien n'est perdu.
-- Deux jetons, jamais dans Git ni dans une interface : `ORION_AGENT_TOKEN` (existant, Core ↔ agent) et le jeton
+- Deux jetons, jamais dans Git ni dans une interface : `ORION_V3_AGENT_TOKEN` (Core V3 ↔ agent V3, jamais celui de
+  la production) et le jeton
   de liaison (`FRAGFACTORY_LINK_TOKEN` dans le `.env` de l'agent = `ORION_LINK_TOKEN` dans Frag Factory).
 
 ## 2. Fichiers
@@ -52,15 +55,17 @@ Identifiant de clip : jamais inventé par le modèle. Il est lu dans les mots, v
 avant la confirmation (zéro ou plusieurs correspondances : « précisez », rien n'est fait), puis revérifié par
 Frag Factory (statut attendu, clé d'idempotence). Une réponse ambiguë ou une erreur réseau ne valide rien.
 
-## 4. Mise en service (rien n'est actif par défaut)
+## 4. Mise en service
 
-1. **Frag Factory** : Paramètres → Intégration ORION → activer ; Paramètres → Clés API → `ORION_LINK_TOKEN`
-   (32 caractères minimum, par ex. `python -c "import secrets;print(secrets.token_urlsafe(32))"`). Redémarrer.
-2. **Agent Windows du PC fixe** : dans `windows_agent.toml`, `[fragfactory] enabled = true` ; dans son `.env`,
-   `FRAGFACTORY_LINK_TOKEN=<le même jeton>`. Redémarrer l'agent : il refuse de démarrer si le jeton manque.
-3. **Core ORION** : `[tools.devices]` doit déclarer le PC fixe ; `[fragfactory] enabled = true` (et `device`
-   si le PC n'est pas l'appareil par défaut). Redémarrer le Core.
-4. **ORION Control** → Frag Factory : régler l'heure du bilan, les canaux (voix, écrit), les niveaux annoncés.
+1. **Agent Windows V3** (`deploy/v3_agent.toml`) : `[fragfactory] enabled = true`, et `url` vers l'instance visée.
+   Le jeton de liaison est `FRAGFACTORY_LINK_TOKEN`, dans `%LOCALAPPDATA%\ORION V3 Agent\.env`. L'agent refuse de
+   démarrer s'il manque.
+2. **Frag Factory** : intégration ORION activée, et `ORION_LINK_TOKEN` égal au jeton de liaison. L'instance d'essai
+   est réglée ainsi par `deploy/v3_fragfactory_essai.ps1`.
+3. **Core V3** : `[fragfactory] enabled = true`, `agent_url = "http://192.168.1.128:8875"`. Le jeton
+   `ORION_V3_AGENT_TOKEN` est dans le `.env` du Core. Si l'agent ou son jeton manquent, le module ne démarre pas et
+   le reste d'ORION démarre quand même.
+4. **ORION Control** → Frag Factory : l'heure du bilan, les canaux, les niveaux annoncés.
 
 ## 5. Vérification
 
@@ -83,5 +88,39 @@ Frag Factory (statut attendu, clé d'idempotence). Une réponse ambiguë ou une 
 
 - Pas de notification de bureau Windows (ORION n'a pas ce canal) : voix et écrit seulement.
 - Démos CS2 non prises en charge par Frag Factory : `demo.imported` est déclaré, jamais émis.
-- Non éprouvé sur le mini-PC ni sur le réseau local : la chaîne réelle a tourné sur 127.0.0.1 d'un seul PC.
+- **Votre vraie instance (port 8742) n'est pas reliée.** Elle contient vos 168 enregistrements et leurs
+  transcriptions de micro : des données personnelles réelles, qui ne vont pas dans la V3 sans votre accord. Pour la
+  relier, mettez `url = "http://127.0.0.1:8742"` dans `deploy/v3_agent.toml`, et le jeton de liaison dans ses
+  Paramètres → Clés API. Activez aussi son intégration ORION ; au premier redémarrage, sa migration 8 ajoute des
+  tables.
+- **Annonces non entendues dans la V3.** La V3 n'a ni voix (`[audio] mode = "none"`) ni messages écrits : les
+  annonces sont décidées et gardées dans l'historique, mais pas entendues.
 - Sans `tzdata`, Windows retombe sur l'heure locale pour le fuseau du bilan.
+
+## 8. Essai réel du 4 novembre 2026 (V3)
+
+La chaîne réelle complète a tourné sur l'instance d'essai, aux données fictives : mini-PC (Core V3), réseau local,
+agent V3 du PC, Frag Factory (port 8752).
+
+| Étape | Résultat |
+|---|---|
+| Synchronisation | 10 événements reçus, puis acquittés (curseur 10 des deux côtés) |
+| Production de clips | auto-test : un vrai REC synthétique analysé, puis rendu 9:16 par FFmpeg |
+| Annonces | décidées et gardées (heures calmes, pas de canal dans la V3) ; affichées dans ORION Control |
+| « Où en est Frag Factory ? », « quels clips attendent ma validation ? » | état et liste exacts |
+| « Valide le dernier clip » → « non » | rien n'est fait |
+| « Valide le dernier clip » → « oui » | clip 2 `APPROVED` dans Frag Factory, avec clé d'idempotence ; inscrit au registre |
+| « Refuse le clip 1 » → « oui » | clip 1 `REJECTED` |
+| « Quel montage tu ferais pour le clip 2 ? » → « Produis la version 1 » → « oui » | nouvelle version rendue, revenue en validation |
+| ORION Control, vue Frag Factory | liaison, clips à valider, décisions, annonces et événements conformes |
+
+**Défauts trouvés pendant cet essai, et corrigés (chacun avec un test) :**
+- « Valide le dernier clip » partait en recherche Web, à cause du mot « dernier ». La réponse inventée affirmait la
+  validation. Désormais, une intention `tool.fragfactory` est testée avant la recherche, et le garde-fou des actions
+  prétendues connaît les clips.
+- « Produis la version 1 », sans clip nommé, ne trouvait pas le clip. C'est maintenant celui de la proposition qui
+  vient d'être faite.
+- « Je vais produire la version 1 » (réponse libre, sans outil) n'était pas reconnu comme une action prétendue.
+
+Test de bout en bout automatisé (`tests/test_fragfactory_e2e.py`) : vrai Frag Factory, vrai agent, et vrai transport
+V3 (`agent_transport`). Il passe sur le PC (93 s).

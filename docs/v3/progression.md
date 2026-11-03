@@ -54,6 +54,16 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 | 17:50 | Questions vers les outils V3 en lecture seule ; « quelles sont les actualités ? » donne le journal | `753356f` | 2340 | oui, vérifié |
 | 23:50 | DISCORD : RPC local officiel via un agent Windows V3 distinct (port 8875, jeton propre), vue Control (`discord.md`) | (ce commit) | 2378 | oui ; liaison Discord en attente du propriétaire |
 
+## Nuit du 3 au 4 novembre 2026 (directive « ingénieur autonome nocturne »)
+
+| Heure | Chantier | Commit | Tests | Vérifié en réel |
+|---|---|---|---|---|
+| 00:05 | P0 : isolation constatée appliquée ; déploiement V3 par script (garde-fous, sauvegarde vérifiée, santé, retour automatique) ; sauvegarde et restauration des données V3 | `277193c`, `abec87a`, `61f9679` | 2425 | oui : déploiement normal, et retour arrière sur un commit cassé |
+| 00:20 | P1 : agent Windows V3 supervisé (une instance, relance), démarrage automatique | `f1039a3` | +5 | oui : second lancement refusé, agent tué relancé en 2 s |
+| 00:35 | P2 : Frag Factory par l'agent V3 seulement ; client d'agent V3 commun ; instance d'essai aux données fictives | `4e11f4c` | 2439 | oui : chaîne réelle Core → agent → Frag Factory |
+| 00:50 | P2 : routage des demandes de clips, « produis la version 1 », garde-fou des actions prétendues | `3185cee`, `417ad10`, `e74b662` | 2450 | oui : valider, refuser, nouvelle version à la voix, ORION Control |
+| 00:55 | P3 : identifiant Discord refusé signalé clairement (constaté sur le vrai Discord), liaison guidée en un script | `d1644d6` | 2451 | oui : poignée de main réelle avec Discord |
+
 **En attente du propriétaire :**
 - `sudo bash /home/user/orion-v3/deploy/v3_isolation.sh` (règles réseau et limites de ressources de la V3) ;
 - `sudo bash /home/user/orion-v3/deploy/v3_accounts.sh` (comptes `orion-import` et `orion-evolve`), quand les imports

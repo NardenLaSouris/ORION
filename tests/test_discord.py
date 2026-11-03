@@ -329,6 +329,9 @@ def test_unconfigured_agent_never_talks_to_discord(fake, tmp_path):
         assert link.snapshot()["discord"] == "ouvert" and fake.commands == []
         with pytest.raises(Exception):
             link.link()
+        with pytest.raises(Exception) as err:
+            link.request("GET_VOICE_SETTINGS")
+        assert err.value.code == "discord_not_configured"  # jamais « Discord fermé » quand il est ouvert
     finally:
         link.stop()
 

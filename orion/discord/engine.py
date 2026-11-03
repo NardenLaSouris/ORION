@@ -329,7 +329,10 @@ class DiscordEngine(BaseModule):
             return "Je n'ai pas accès à Discord : l'agent du PC ne répond pas."
         if exc.code == "discord_closed":
             return "Discord n'est pas ouvert sur le PC."
-        if exc.code in ("discord_unlinked", "discord_not_configured"):
+        if exc.code == "discord_not_configured":
+            return ("Discord est ouvert, mais l'application ORION n'est pas encore configurée sur l'agent "
+                    "(voir docs/v3/discord.md).")
+        if exc.code == "discord_unlinked":
             return "ORION n'est pas encore autorisé dans Discord : reliez-le depuis ORION Control."
         return exc.message
 

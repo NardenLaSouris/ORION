@@ -39,6 +39,7 @@ RATES = range(8000, 48001)
 FRAMES = range(160, 16001)
 STATUS = {TOOL_NOT_FOUND: 404, INVALID_PARAMETERS: 400}
 FACE_REOPEN_AFTER = 300.0
+QUIET_ACTIONS = ("discord_state", "discord_events")
 MUSIC_PATHS = ("/audio/music", "/audio/music/stop", "/audio/music/duck", "/audio/music/volume")
 
 
@@ -179,8 +180,10 @@ class AgentServer:
                 started = time.monotonic()
                 with trace.request(trace.valid(self.headers.get(trace.HEADER)) or None):
                     status, data = agent._run(path.removeprefix("/actions/"), body)
-                    log.info("Agent : action %s -> %s en %.0f ms", path.removeprefix("/actions/")[:40], status,
-                             (time.monotonic() - started) * 1000)
+                    name = path.removeprefix("/actions/")[:40]
+                    # Sondage d'état (toutes les quelques secondes) : au journal détaillé seulement.
+                    log.log(logging.DEBUG if name in QUIET_ACTIONS and status == 200 else logging.INFO,
+                            "Agent : action %s -> %s en %.0f ms", name, status, (time.monotonic() - started) * 1000)
                 self._json(status, data)
 
             def _route(self) -> tuple[str | None, dict]:

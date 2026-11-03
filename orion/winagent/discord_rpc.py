@@ -308,6 +308,8 @@ class DiscordLink:
 
     def request(self, command, args: dict | None = None, timeout: float | None = None) -> Any:
         """Commande exécutée par le fil Discord ; RpcError si Discord est fermé, non lié, ou refuse."""
+        if not self.configured():
+            raise RpcError("discord_not_configured", "Application Discord non configurée sur l'agent.")
         if self.state["discord"] != "connecté":
             raise RpcError("discord_closed", "Discord n'est pas ouvert sur le PC.")
         if self.state["auth"] != "lié":

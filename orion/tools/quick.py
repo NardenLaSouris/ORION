@@ -239,7 +239,7 @@ class QuickPlanner:
             return None
         if memory is not None:
             return {"type": "tool_call", "tool": memory[0], "parameters": memory[1]}
-        parsers = (self._media, self._calendar, self._routine, self._face, self._sound, self._lights, self._apps,
+        parsers = (self._discord, self._media, self._calendar, self._routine, self._face, self._sound, self._lights, self._apps,
                    self._timer, self._reminder, self._alarm, self._weather, self._lock, self._power, self._spotify)
         # Un rappel ou un réveil d'abord : son message peut nommer n'importe quoi (« rappelle-moi demain d'appeler le
         # garage », « ... d'éteindre la chambre »), qui ne doit jamais être exécuté tout de suite.
@@ -395,6 +395,14 @@ class QuickPlanner:
 
         theme = said_theme(text)
         return ("set_face_theme", {"theme": theme}) if theme else None
+
+    def _discord(self, norm, text, previous):
+        """Discord (module V3) : micro, sourdine, salon vocal ; avant le son du PC (« mets-moi en sourdine »)."""
+        if not self._exists("discord_status"):
+            return None
+        from orion.discord.intent import discord_plan
+
+        return discord_plan(text, self._exists, self._registry.context.get("discord.deafened"))
 
     def _sound(self, norm, text, previous):
         if _has(norm, UNMUTE) and self._exists("unmute_volume"):

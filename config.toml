@@ -607,6 +607,16 @@ probe_seconds = 60.0
 history_days = 7
 notify_after_seconds = 120.0
 
+# Discord Desktop du PC (docs/v3/discord.md) : RPC local officiel via l'agent Windows V3 (jamais celui de la
+# production) ; jeton de l'agent dans le .env sous token_env.
+[discord]
+enabled = false
+agent_url = ""
+token_env = "ORION_V3_AGENT_TOKEN"
+poll_seconds = 5.0
+timeout = 6.0
+undeafen_keeps_mute = true
+
 # Achats sous mandat (docs/v3/purchase.md) : bac à sable seulement, niveau 1 (confirmation) par défaut.
 [purchase]
 enabled = false

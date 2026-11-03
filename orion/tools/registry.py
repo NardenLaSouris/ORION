@@ -12,6 +12,8 @@ NAME = re.compile(r"^[a-z][a-z0-9_]{1,47}$")
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        # États lus par la compréhension sans LLM (ex. « discord.deafened ») : des lectures, jamais des actions.
+        self.context: dict = {}
 
     def register(self, tool: Tool) -> None:
         if not NAME.match(tool.name):

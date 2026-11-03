@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_agent_config(args.config, args.env)
     except (OSError, ValueError) as exc:
         return fail(f"Configuration de l'agent invalide : {exc}", 2)
-    actions = pc_actions(config.tools)
+    actions = pc_actions(config.tools) if config.pc_tools else ToolRegistry()
     try:
         from orion.fragfactory.agent_action import build_from_agent_config
 
@@ -62,7 +62,15 @@ def main(argv: list[str] | None = None) -> int:
         return fail(f"Configuration [fragfactory] invalide : {exc}", 2)
     if ff is not None:
         actions.register(ff)
-    server = AgentServer(config, actions)
+    discord = None
+    if config.discord is not None:
+        from orion.winagent.discord_actions import discord_actions
+        from orion.winagent.discord_rpc import DiscordLink, DiscordSettings
+
+        discord = DiscordLink(DiscordSettings(**config.discord))
+        for tool in discord_actions(discord):
+            actions.register(tool)
+    server = AgentServer(config, actions, discord=discord)
     try:
         server.start()
     except OSError as exc:

@@ -223,6 +223,13 @@ def planner_prompt(registry: ToolRegistry) -> str:
                      "« il manque… / retouche » -> fragfactory_request_revision ; « produis / applique la version N » -> "
                      "fragfactory_request_render. Le clip n'est jamais un paramètre : il est lu dans la demande. Publier "
                      "un clip à la voix : none.")
+    if registry.exists("discord_status"):
+        rules.append("- Discord : « mute-moi », « coupe mon micro » : discord_mute ; « démute-moi », « réactive mon "
+                     "micro » : discord_unmute (seulement si la demande dit de rouvrir le micro) ; « mets-moi en "
+                     "sourdine », « deafen » : discord_deafen ; « enlève la sourdine » : discord_undeafen ; « rejoins le "
+                     "vocal X » : discord_join (salon : le nom dit) ; « quitte le vocal / Discord » : discord_leave ; "
+                     "« qui est dans le vocal ? » : discord_participants ; « suis-je mute ? », « où suis-je sur "
+                     "Discord ? » : discord_status. Jamais de démute pour une demande qui ne le dit pas.")
     if registry.exists("create_watch"):
         rules.append("- « Surveille… », « préviens-moi quand » un prix baisse, un produit revient en stock, un événement "
                      "de jeu ou une annonce officielle sort : create_watch (information extérieure), jamais "
@@ -442,6 +449,16 @@ DOMAIN_WORDS = {
     "fragfactory_request_revision": ("manque", "retouche", "retravaille", "retravailler", "corrige", "refais"),
     "fragfactory_request_render": ("produis", "produire", "applique", "appliquer", "genere", "rends", "fais la",
                                    "lance la", "version"),
+    # DISCORD (V3) : le mot de Discord doit avoir été dit ; le démute, explicitement.
+    "discord_status": ("discord", "vocal", "salon", "micro", "mute", "muet", "sourdine", "deafen"),
+    "discord_participants": ("vocal", "salon", "discord", "qui", "participants", "avec moi"),
+    "discord_join": ("rejoins", "rejoint", "rejoindre", "vocal", "salon", "canal", "discord"),
+    "discord_leave": ("quitte", "quitter", "deconnecte", "sors", "raccroche", "vocal", "discord", "salon"),
+    "discord_mute": ("mute", "micro", "muet", "muette"),
+    "discord_unmute": ("demute", "unmute", "de mute", "reactive mon micro", "rouvre mon micro", "rallume mon micro",
+                       "remets mon micro", "active mon micro", "ouvre mon micro"),
+    "discord_deafen": ("sourdine", "deafen", "sourd", "casque"),
+    "discord_undeafen": ("sourdine", "undeafen", "reactive le son", "remets le son", "casque"),
     # WATCH (V3) : une information extérieure à surveiller.
     "create_watch": ("surveille", "surveiller", "surveillez", "surveillance", "previens moi", "prix", "disponible",
                      "en stock", "bonne affaire", "annonce", "sortie", "pokemon"),
@@ -496,7 +513,9 @@ READ_ONLY_TOOLS = ("get_", "list_", "light_status", "find_", "read_", "recall", 
                    "news_", "sentinel_status", "missed_notifications",
                    # Frag Factory : lecture et conseil (une question ne déclenche jamais une validation ni un rendu)
                    "fragfactory_status", "fragfactory_list_", "fragfactory_get_", "fragfactory_play_clip",
-                   "fragfactory_analyze_clip_style", "fragfactory_recommend_editing_style")
+                   "fragfactory_analyze_clip_style", "fragfactory_recommend_editing_style",
+                   # Discord : état et participants (lecture)
+                   "discord_status", "discord_participants")
 QUESTION = re.compile(r"^(?:jarvis )?(?:est ce que|est ce qu|est il|est elle|y a t il|qu est ce qui|quel|quelle|quels|"
                       r"quelles|combien|pourquoi|comment|ou est|quand)\b")
 REQUEST = re.compile(r"\b(?:tu peux|peux tu|tu pourrais|pourrais tu|vous pouvez|pouvez vous|vous pourriez|"

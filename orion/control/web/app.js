@@ -934,9 +934,72 @@
     });
   }
 
+  // Discord : état lu sur l'agent Windows V3 (rafraîchi toutes les 5 s) ; chaque bouton est une commande explicite.
+  let discordTimer = null;
+
+  async function discordView() {
+    clearInterval(discordTimer);
+    discordTimer = setInterval(() => { if (state.view !== "discord") clearInterval(discordTimer); else show("discord"); }, 5000);
+    await moduleView("Discord", "discord", async () => {
+      const d = await mod("discord");
+      const refresh = () => show("discord");
+      const run = (action, body) => mod("discord", `/${action}`, "POST", body || {}).then((r) => {
+        toast(r.text, r.ok ? "ok" : "err");
+        refresh();
+      }).catch((error) => toast(error.message, "err"));
+      const voice = d.voice;
+      const yesNo = (v) => (v === null || v === undefined ? "inconnu" : v ? "oui" : "non");
+      const ready = d.capabilities.ready;
+      const banner = d.agent.state !== "en ligne"
+        ? el("div", { class: "banner" }, `Agent Windows V3 hors ligne depuis ${stamp(d.agent.since)} : `
+          + "Discord ne peut pas être piloté. Lancez l'agent V3 sur le PC (voir docs/v3/discord.md).")
+        : !ready ? el("div", { class: "banner" }, `Discord indisponible : ${d.capabilities.reason}.`) : null;
+      const people = voice ? voice.participants.map((p) => [p.name, p.mute ? "oui" : "non", p.deaf ? "oui" : "non"]) : [];
+      const channels = el("div");
+      const loadChannels = () => mod("discord", "/channels").then((r) => {
+        channels.replaceChildren(table(["Serveur", "Salon vocal", ""], r.guilds.flatMap((g) => g.channels.map((c) => [g.name, c.name,
+          button("Rejoindre", () => run("join", { channel_id: c.id }))])), "Aucun salon vocal visible."));
+      }).catch((error) => toast(error.message, "err"));
+      view.replaceChildren(
+        el("h1", {}, "Discord"),
+        banner,
+        cards([["Agent du PC", d.agent.state, d.agent.error || ""], ["Discord", d.discord, d.user ? `compte : ${d.user}` : ""],
+          ["Autorisation d'ORION", d.auth], ["Serveur", voice ? voice.guild || "—" : "—"],
+          ["Salon vocal", voice ? voice.channel : "aucun", d.connection || ""], ["Micro coupé", yesNo(d.mute)],
+          ["Sourdine", yesNo(d.deaf)]]),
+        el("div", { class: "toolbar" },
+          button("Mute", () => run("mute")), button("Démute", () => run("unmute")),
+          button("Deafen", () => run("deafen")), button("Undeafen", () => run("undeafen")),
+          button("Quitter le salon", () => run("leave"), "danger"),
+          button("Actualiser", () => mod("discord", "/refresh", "POST").then(refresh))),
+        el("h2", {}, "Participants"),
+        voice ? table(["Nom", "Micro coupé", "Sourdine"], people, "Personne.") : el("div", { class: "empty" }, "Vous n'êtes dans aucun salon vocal."),
+        el("h2", {}, "Salons vocaux"),
+        el("div", { class: "toolbar" }, button("Afficher les salons", loadChannels)),
+        channels,
+        el("h2", {}, "Liaison"),
+        el("div", { class: "toolbar" },
+          button("Relier ORION à Discord", () => run("link"), "primary"),
+          button("Retirer l'autorisation", () => run("unlink"), "danger")),
+        el("h2", {}, "Derniers changements"),
+        table(["Heure", "Événement"], d.events.slice(0, 20).map((e) => [stamp(e.at), describeDiscord(e)]), "Aucun changement."));
+    });
+  }
+
+  function describeDiscord(e) {
+    if (e.kind === "channel") return e.action === "quitté" ? `Salon ${e.channel} quitté` : `Salon ${e.channel} ${e.action}${e.guild ? ` (${e.guild})` : ""}`;
+    if (e.kind === "participant") return `${e.name} ${e.action === "arrivé" ? "est arrivé" : "est parti"}`;
+    if (e.kind === "voice_settings") return `Micro ${e.mute ? "coupé" : "ouvert"}, sourdine ${e.deaf ? "activée" : "désactivée"}`;
+    if (e.kind === "agent") return `Agent du PC ${e.state}`;
+    if (e.kind === "discord") return `Discord ${e.state}`;
+    if (e.kind === "auth") return `Autorisation : ${e.state}${e.message ? ` (${e.message})` : ""}`;
+    if (e.kind === "safety") return `Sécurité : ${e.message}`;
+    return e.kind;
+  }
+
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
-    news: newsView, sentinel: sentinelView, evolve: evolveView, purchase: purchaseView, notifications: notificationsView,
-    autonomy: autonomyView, fragfactory: fragfactoryView };
+    news: newsView, sentinel: sentinelView, discord: discordView, evolve: evolveView, purchase: purchaseView,
+    notifications: notificationsView, autonomy: autonomyView, fragfactory: fragfactoryView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],
     ["visage", "Comme le visage d'ORION (sa couleur du moment)"], ["jarvis", "ORION (jour)"],

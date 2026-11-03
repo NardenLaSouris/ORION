@@ -26,6 +26,7 @@ class V3Modules:
     def __init__(self, store: Store, scheduler: Scheduler, alerts: AlertRouter, registry: ModuleRegistry,
                  tools: list):
         self.store, self.scheduler, self.alerts, self.registry, self.tools = store, scheduler, alerts, registry, tools
+        self.contexts: dict = {}
         self._calls = None
 
     def connect(self, calls: Any | None) -> None:
@@ -89,7 +90,8 @@ JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.
                "sentinel:probe": ("module:sentinel", Capability.READ.value),
                # Frag Factory : notifications de clips et rapport du matin, que vous avez activés vous-même.
                "fragfactory:sync": ("delegated:fragfactory:notifications", Capability.NOTIFY.value),
-               "fragfactory:report": ("delegated:fragfactory:report", Capability.NOTIFY.value)}
+               "fragfactory:report": ("delegated:fragfactory:report", Capability.NOTIFY.value),
+               "discord:poll": ("module:discord", Capability.READ.value)}
 
 
 def classify_job(job_id: str) -> tuple[str, str]:
@@ -111,7 +113,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
              foundation=None) -> V3Modules | None:
     """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
     planificateur s'arrête net sur arrêt d'urgence."""
-    wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel", "fragfactory")
+    wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel", "fragfactory", "discord")
               if getattr(cfg, name).enabled]
     if not wanted:
         return None
@@ -147,6 +149,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
     structured = StructuredLLM(llm, available=lambda: not getattr(llm, "degraded", False)) if llm is not None \
         else None
     registry, tools = ModuleRegistry(), []
+    contexts: dict = {}  # états lus par la compréhension sans LLM (« réactive le son » : Discord en sourdine ?)
     registry.register(NotificationsModule(alerts))  # historique commun des alertes (ORION Control)
     news = None
     if "news" in wanted:
@@ -243,6 +246,26 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
         fragfactory = build_module(cfg, store, alerts=alerts, scheduler=scheduler, history=history)
         registry.register(fragfactory)
         tools += fragfactory_tools(fragfactory)
+    if "discord" in wanted:
+        from orion.config import secret
+        from orion.factory import ENV_FILE
+        from orion.discord import AgentLink, DiscordEngine, DiscordSettings
+        from orion.discord.tools import discord_tools
+
+        d = cfg.discord
+        token = secret(d.token_env, ENV_FILE) if d.agent_url else ""
+        if not d.agent_url or len(token) < 32:
+            log.warning("DISCORD : agent_url ou jeton %s absent : module non démarré", d.token_env)
+        else:
+            discord = DiscordEngine(AgentLink(d.agent_url, token, d.timeout), scheduler=scheduler,
+                                    decide=permits.decide if permits else None,
+                                    ledger=foundation.ledger if foundation is not None else None,
+                                    settings=DiscordSettings(d.poll_seconds,
+                                                             undeafen_keeps_mute=d.undeafen_keeps_mute))
+            registry.register(discord)
+            tools += discord_tools(discord)
+            contexts["discord.deafened"] = discord.deafened
     modules = V3Modules(store, scheduler, alerts, registry, tools)
+    modules.contexts = contexts
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)
     return modules

@@ -472,6 +472,18 @@ class SentinelConfig:
 
 
 @dataclass(frozen=True)
+class DiscordConfig:
+    """DISCORD (docs/v3/discord.md) : Discord Desktop du PC piloté par le RPC local officiel, via l'agent Windows V3
+    (son jeton dans ``token_env`` du .env, jamais celui de la production)."""
+    enabled: bool = False
+    agent_url: str = ""
+    token_env: str = "ORION_V3_AGENT_TOKEN"
+    poll_seconds: float = 5.0
+    timeout: float = 6.0
+    undeafen_keeps_mute: bool = True  # fin de sourdine : le micro reste coupé (démute explicite seulement)
+
+
+@dataclass(frozen=True)
 class PurchaseConfig:
     enabled: bool = False
     level: int = 1  # 1 : ORION prépare et demande confirmation ; 2 et 3 : activation explicite (voir orion/purchase)
@@ -536,6 +548,7 @@ class Config:
     purchase: PurchaseConfig = PurchaseConfig()
     sentinel: SentinelConfig = SentinelConfig()
     fragfactory: FragFactoryConfig = FragFactoryConfig()
+    discord: DiscordConfig = DiscordConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -667,6 +680,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "news": NewsConfig,
         "evolve": EvolveConfig,
         "sentinel": SentinelConfig,
+        "discord": DiscordConfig,
         "purchase": PurchaseConfig,
         "fragfactory": FragFactoryConfig,
     }

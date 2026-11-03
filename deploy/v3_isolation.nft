@@ -5,7 +5,8 @@
 # - Production sur le mini-PC : 8765 visage, 8766 API, 8767 fond d'écran (il autorise toujours 127.0.0.1), 8770
 #   passerelle d'appel ; par la boucle locale comme par l'adresse du réseau.
 # - Agents de la production : PC fixe et Katana (8765), transcription du Katana (8766).
-# Restent permis : Ollama (11434), SearXNG (8080), Internet (flux d'actualités), ses propres ports 8865-8867.
+# Restent permis : Ollama (11434), SearXNG (8080), Internet (flux d'actualités), ses propres ports 8865-8867,
+# l'agent Windows V3 du PC (8875, son propre jeton : module DISCORD).
 
 table inet orion_v3_isolation
 delete table inet orion_v3_isolation

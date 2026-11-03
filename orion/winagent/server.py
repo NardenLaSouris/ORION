@@ -65,8 +65,9 @@ class _BaseHandler(JsonHandler):
 class AgentServer:
     def __init__(self, config: AgentConfig, actions: ToolRegistry | None = None, audio: AudioRelay | None = None,
                  open_page: Callable[[str], object] | None = None, clock: Callable[[], float] = time.monotonic,
-                 music=None):
+                 music=None, discord=None):
         self.config = config
+        self.discord = discord  # lien Discord (DiscordLink) démarré et arrêté avec l'agent
         self.actions = actions if actions is not None else ToolRegistry()
         self.audio = audio if audio is not None else AudioRelay(config.input_device, config.output_device)
         if music is None:
@@ -89,6 +90,8 @@ class AgentServer:
     def start(self) -> None:
         """Ouvre le port (OSError s'il est déjà pris) et sert les requêtes en arrière-plan."""
         self._stopping.clear()
+        if self.discord is not None:
+            self.discord.start()
         self._httpd = ExclusiveServer((self.config.host, self.config.port), self._handler())
         threading.Thread(target=self._httpd.serve_forever, name="agent-windows", daemon=True).start()
 
@@ -98,6 +101,8 @@ class AgentServer:
             self._httpd.shutdown()
             self._httpd.server_close()
             self._httpd = None
+        if self.discord is not None:
+            self.discord.stop()
         self.audio.close()
         self.music.close()
 
@@ -142,7 +147,7 @@ class AgentServer:
                     return
                 if path == "/health":
                     return self._json(200, {"status": "ok", "agent": AGENT_NAME})
-                if path != "/audio/input":
+                if path != "/audio/input" or not agent.config.audio:
                     return self._error(404, "not_found")
                 if self._authenticated():
                     self._stream_microphone(query)
@@ -151,8 +156,8 @@ class AgentServer:
                 path, query = self._route()
                 if path is None:
                     return
-                if not (path.startswith("/actions/") or path in ("/audio/output", "/audio/drain", "/audio/stop")
-                        or path in MUSIC_PATHS):
+                audio_path = path in ("/audio/output", "/audio/drain", "/audio/stop") or path in MUSIC_PATHS
+                if not (path.startswith("/actions/") or audio_path and agent.config.audio):
                     return self._error(404, "not_found")
                 if not self._authenticated():
                     return

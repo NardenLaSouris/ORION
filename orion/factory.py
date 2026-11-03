@@ -1079,6 +1079,8 @@ def build_agent(
         extra.append(bulletin_delivery.tool())  # « montre-moi le bulletin » ; étape de la routine réveil
     tools = build_tools(cfg, personality, events, timers, weather, devices,
                         light_tools_for(rooms, driver, cfg.lights.scenes, home), extra)
+    if tools is not None and v3 is not None:
+        tools.registry.context.update(v3.contexts)
     if tools is not None and foundation is not None:
         tools.permissions = foundation.wrap(tools.permissions)  # le moteur central s'ajoute, sans rien remplacer
     if foundation is not None:

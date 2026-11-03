@@ -181,6 +181,11 @@ reliability = "media"
 [sentinel]
 enabled = true
 
+# Discord Desktop du PC (docs/v3/discord.md) : agent Windows V3 (port 8875), jeton ORION_V3_AGENT_TOKEN du .env.
+[discord]
+enabled = true
+agent_url = "http://192.168.1.128:8875"
+
 [evolve]
 enabled = true
 

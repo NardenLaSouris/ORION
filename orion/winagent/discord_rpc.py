@@ -580,6 +580,14 @@ class DiscordLink:
         if not old or old["channel_id"] != voice["channel_id"]:
             self._event("channel", {"action": "rejoint" if not old else "changé", "channel": voice["channel"],
                                     "guild": guild, "from": (old or {}).get("channel", "")})
+        else:
+            # Même salon relu : une arrivée ou un départ vu ici plutôt que par son événement est signalé quand même.
+            before = {p["id"]: p["name"] for p in old["participants"]}
+            now = {p["id"]: p["name"] for p in voice["participants"]}
+            for pid in now.keys() - before.keys():
+                self._event("participant", {"action": "arrivé", "name": now[pid]})
+            for pid in before.keys() - now.keys():
+                self._event("participant", {"action": "parti", "name": before[pid]})
 
     def _participant(self, evt: str, data: dict) -> None:
         voice = self.state["voice"]

@@ -219,6 +219,20 @@ function render(stats) {
     stt.className = orion.stt.remote && orion.stt.remote_up ? "ok" : orion.stt.remote ? "warn" : "";
     $("wake").textContent = `« ${orion.wake_word} »`;
   }
+  const project = val(stats, "project");
+  if (project) {
+    const size = $("orion-size");
+    size.textContent = `${(project.size / 1e9).toFixed(1).replace(".", ",")} Go`;
+    size.title = Object.entries(project.parts).map(([k, v]) => `${{ code: "code", python: "Python", models: "modèles",
+      data: "données", history: "historique Git" }[k] || k} ${(v / 1e9).toFixed(2).replace(".", ",")} Go`).join(" · ");
+    const euros = (n) => `${Math.round(n).toLocaleString("fr-FR")} €`;
+    const cost = $("orion-cost");
+    cost.textContent = `≈ ${euros(project.total_eur)} · IA ${Math.round(project.ai_usd).toLocaleString("fr-FR")} $ · `
+      + `${project.dev_days} j de dev`;
+    cost.title = `IA : ${Math.round(project.ai_usd).toLocaleString("fr-FR")} $ (${(project.tokens / 1e9).toFixed(1).replace(".", ",")} G tokens, `
+      + `${project.active_hours ?? "?"} h de sessions) · développeur : ${euros(project.labour_eur)} `
+      + `(${project.dev_days} jours pour ${project.lines.toLocaleString("fr-FR")} lignes, ${euros(project.net_monthly)} net/mois)`;
+  }
   const pcs = val(stats, "pcs");
   if (pcs) $("pcs").innerHTML = pcs.map((m, i) => machine(m).replace('<div class="machine',
     `<div data-pc="${i}" class="clickable machine`)).join("");

@@ -212,4 +212,9 @@ def build_sources(cfg, *, llm=None, stt=None, devices=None, presence=None, weath
     url = cfg.llm.host or ""
     if url.startswith("http"):
         sources.append(Source("katana", 20.0, katana_source(url)))
+    from orion.wallpaper.project import project_source
+
+    w = cfg.wallpaper  # poids d'ORION et coût de production : recalculés une fois par heure
+    sources.append(Source("project", 3600.0, project_source(Path(__file__).resolve().parents[2], w.production_stats,
+                                                             w.dev_net_monthly, w.dev_lines_per_day, w.usd_eur)))
     return sources

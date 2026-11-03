@@ -197,3 +197,20 @@ def test_journal_reads_no_personal_data():
     imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
         {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     assert imported <= {"__future__", "re", "dataclasses", "orion.news", "orion.watch.products"}
+
+
+@pytest.mark.parametrize("text, number", [("Approfondis la deuxième", 2), ("parle-moi de la 3", 3),
+                                          ("détaille l'information numéro 4", 4), ("et la dernière ?", -1),
+                                          ("la 1re", 1), ("parle-moi de la BCE", None), ("il y a 12 morts", None)])
+def test_the_item_number_comes_from_the_words_never_from_the_llm(text, number):
+    from orion.news.tools import ordinal
+
+    assert ordinal(text) == number
+
+
+def test_last_item_by_ordinal():
+    w = collected_world()
+    more = {t.name: t for t in news_tools(w.engine)}["news_more"]
+    count = len(w.engine.current_journal()["items"])
+    assert more.run(numero=-1)["number"] == count
+    assert more.parameters["numero"].hidden  # le LLM ne le propose jamais

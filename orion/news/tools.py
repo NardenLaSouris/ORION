@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from orion.news.briefing import detail
 from orion.news.engine import NewsEngine
 from orion.tools.base import Param, Risk, Tool, ToolError
@@ -16,6 +18,23 @@ from orion.watch.products import plain
 
 STALE = 6 * 3600
 MAX_SPOKEN = 900
+ORDINALS = {"premiere": 1, "premier": 1, "deuxieme": 2, "seconde": 2, "second": 2, "troisieme": 3, "quatrieme": 4,
+            "cinquieme": 5, "sixieme": 6, "septieme": 7, "huitieme": 8, "neuvieme": 9, "dixieme": 10,
+            "derniere": -1, "dernier": -1}
+
+
+def ordinal(text: str) -> int | None:
+    """Numéro d'une information d'après les mots de la demande (« la deuxième », « la 3 », « numéro 4 »,
+    « la dernière » : -1) ; jamais deviné par le LLM, qui écrirait un chiffre absent de la demande."""
+    words = plain(text).split()
+    for i, word in enumerate(words):
+        if word in ORDINALS:
+            return ORDINALS[word]
+        match = re.fullmatch(r"(\d{1,2})(?:e|er|re|eme)?", word)
+        if match and 0 < int(match.group(1)) <= 20 and (i == 0 or words[i - 1] in ("la", "le", "numero", "n",
+                                                                                   "info", "information")):
+            return int(match.group(1))
+    return None
 
 
 def news_tools(engine: NewsEngine) -> list[Tool]:
@@ -36,7 +55,8 @@ def news_tools(engine: NewsEngine) -> list[Tool]:
             raise ToolError("not_found", "Le journal ne contient aucune information pour l'instant.")
         item = None
         if numero is not None:
-            item = next((i for i in items if i["number"] == numero), None)
+            wanted = len(items) if numero == -1 else numero
+            item = next((i for i in items if i["number"] == wanted), None)
         elif sujet:
             wanted = set(plain(sujet).split())
             scored = [(len(wanted & set(plain(i["title"] + " " + i.get("summary", "")).split())), i) for i in items]
@@ -46,8 +66,8 @@ def news_tools(engine: NewsEngine) -> list[Tool]:
             raise ToolError("not_found", f"Je ne trouve pas cette information : le journal en compte {len(items)}.")
         return {"text": detail(item)[:MAX_SPOKEN], "number": item["number"]}
 
-    number = Param(int, "numéro de l'information dans le journal (« la deuxième » : 2)", required=False, minimum=1,
-                   maximum=20)
+    number = Param(int, "numéro de l'information dans le journal", required=False, minimum=-1, maximum=20,
+                   hidden=True, resolve=ordinal)
     subject = Param(str, "sujet de l'information, avec les mots de la demande", required=False, max_length=120)
     return [Tool("news_bulletin", "Donne les actualités importantes (dernier bulletin d'ORION NEWS).", {},
                  {"text": "bulletin"}, Risk.SAFE, bulletin, say=lambda r: r["text"]),

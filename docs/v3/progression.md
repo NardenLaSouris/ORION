@@ -46,16 +46,21 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 | 12:40 | Raccourci menu Démarrer « ORION Control V3 » (PC fixe, hors démarrage automatique) | — | — | — |
 | 12:45 | NEWS P1 : journal quotidien (`news.md`, § « Journal quotidien ») | `7087b82` | 2291 | oui, vérifié |
 | 13:00 | NEWS P1 : corrections après un journal réel (un sujet par place, chiffres d'affirmation) | `7c9f14b` | 2292 | oui, vérifié |
+| 13:30 | F5 : service de ressources, tâches lourdes différées, zones d'attente, script des comptes (non installé) | `3c2bdbf` | 2309 | oui, vérifié |
+| 14:00 | NEWS : « approfondis la deuxième », « et la dernière ? » (numéro lu dans les mots, relances) | `5564420` | 2318 | oui, vérifié |
+| 15:20 | Fond d'écran : poids d'ORION et coût de production estimé (demande du propriétaire) | `d467fb0` | 2323 | oui, vérifié à 1920×1080 |
 
 **En attente du propriétaire :**
 - `sudo bash /home/user/orion-v3/deploy/v3_isolation.sh` (règles réseau et limites de ressources de la V3) ;
+- `sudo bash /home/user/orion-v3/deploy/v3_accounts.sh` (comptes `orion-import` et `orion-evolve`), quand les imports
+  seront décidés ;
 - création d'une vraie clé de données personnelles (F4), seulement s'il le décide ;
 - inventaire Takeout, quand l'export sera déposé.
 
 ## Prochain chantier
 
-1. F5 : service de ressources et mode dégradé (Katana, transcription, agents, NAS facultatif) ; spécification et
-   scripts des comptes `orion-import` et `orion-evolve`, sans installation.
+1. Relevé des tokens à rafraîchir : `python scripts/production_stats.py --out <fichier>` sur le PC, puis copie dans
+   `/opt/orion-v3/data/production_stats.json` (fait à chaque déploiement ; automatisation à décider).
 2. Essai réel du journal pendant une semaine dans V3 ; réglages d'après les journaux obtenus.
 3. Ensuite, selon les dépendances de la feuille de route : KNOWLEDGE (P2, base personnelle) une fois la clé décidée ;
    MISSIONS (F1, F2).

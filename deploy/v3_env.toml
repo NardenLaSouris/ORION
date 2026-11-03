@@ -186,6 +186,11 @@ enabled = true
 enabled = true
 agent_url = "http://192.168.1.128:8875"
 
+# Frag Factory (docs/v3/fragfactory.md) : même agent Windows V3 ; l'agent vise l'instance d'essai (données fictives).
+[fragfactory]
+enabled = true
+agent_url = "http://192.168.1.128:8875"
+
 [evolve]
 enabled = true
 

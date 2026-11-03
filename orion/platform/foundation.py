@@ -76,6 +76,10 @@ class Foundation:
         self.autonomy.on_change(lambda before, after: self.tasks.request_stop_all("arrêt d'urgence")
                                 if after is AutonomyState.EMERGENCY_STOP else None)
         self.personal = None  # base personnelle chiffrée (lot F4), branchée par attach_personal
+        from orion.platform.resources import ResourceService
+
+        self.resources = ResourceService()  # lot F5 : sondes posées par la fabrique
+        self.tasks.busy = self.resources.busy
 
     def attach_personal(self, personal, keyring) -> None:
         """Lot F4 : les textes personnels des bases opérationnelles sont scellés avec la clé de la base personnelle,
@@ -195,6 +199,8 @@ class Foundation:
         """``session`` : client authentifié par l'API (IP autorisée et jeton vérifiés avant d'arriver ici)."""
         if route and route[0] == "personal":
             return self._personal_admin(method, route[1:])
+        if route == ["resources"] and method == "GET":
+            return 200, self.resources.status()
         if route == ["autonomy"] and method == "GET":
             return 200, self.autonomy.snapshot()
         if route == ["autonomy"] and method == "POST":

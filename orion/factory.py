@@ -888,6 +888,44 @@ def build_wallpaper(cfg: Config, tools=None, inbox=None, user: str = "", **servi
     return server
 
 
+def configure_resources(cfg: Config, resources, llm, devices, agent=None) -> None:
+    """Lot F5 : sondes des ressources et comportement de chaque partie d'ORION sans elles (ORION Control, tests
+    « ressource absente »). Aucune n'est indispensable : le Core démarre et converse sans elles."""
+    from orion.platform import resources as rs
+
+    if hasattr(llm, "degraded"):
+        resources.register(rs.LLM, lambda: (not llm.degraded, llm.state if hasattr(llm, "state") else ""), ttl=5)
+    resources.register(rs.STT, rs.tcp_probe(cfg.stt.remote), ttl=60)
+    for key, name in (("pc", rs.AGENT_PC), ("portable", rs.AGENT_LAPTOP)):
+        device = None
+        if devices is not None and key in devices.keys():
+            device = devices[key]
+        if device is not None and device.url:
+            resources.register(name, rs.tcp_probe(device.url), label=f"Agent de {device.name}", ttl=60)
+    if cfg.web.enabled:
+        resources.register(rs.WEB, rs.tcp_probe(cfg.web.base_url), ttl=120)
+    resources.register(rs.NAS, rs.directory_probe(cfg.platform.nas_path), ttl=300)
+    resources.declare("Core", {
+        rs.LLM: "LLM de secours du mini-PC, puis règles : commandes simples et réponses courtes",
+        rs.STT: "Whisper local (small) sur le mini-PC, plus lent",
+        rs.AGENT_PC: "actions sur le PC refusées avec une explication ; tout le reste continue",
+        rs.AGENT_LAPTOP: "actions sur le portable refusées avec une explication",
+        rs.WEB: "questions d'actualité : ORION dit qu'elle ne peut pas chercher",
+        rs.NAS: "aucun effet : rien d'opérationnel n'est rangé sur le NAS"})
+    if cfg.news.enabled:
+        resources.declare("NEWS", {rs.LLM: "regroupement par mots et synthèses simples (titre, statut, sources)"})
+    if cfg.watch.enabled:
+        resources.declare("WATCH", {rs.WEB: "flux et pages déclarés seulement",
+                                    rs.LLM: "demandes comprises par règles"})
+    if cfg.evolve.enabled:
+        resources.declare("EVOLVE", {rs.LLM: "diagnostic par règles seulement"})
+    if cfg.platform.personal:
+        resources.declare("Données personnelles", {
+            rs.NAS: "sauvegarde chiffrée vers un autre dossier (datakey backup), jamais en attente silencieuse"})
+    if agent is not None:
+        resources.in_conversation = lambda: bool(getattr(agent, "conversing", False))
+
+
 def build_agent(
     cfg: Config,
     source: AudioSource | None = None,
@@ -1215,6 +1253,8 @@ def build_agent(
         eve = EveWatch(events, timers, calendar)
         eve.permit = foundation.permissions.decide if foundation is not None else None
         eve.start()  # fil de fond, arrêté avec ORION
+    if foundation is not None:
+        configure_resources(cfg, foundation.resources, llm, devices, agent)
     # Échéance proche (rendez-vous, minuteur, rappel) pour l'anneau du visage.
     agent.upcoming = Upcoming(calendar, timers) if calendar is not None or timers is not None else None
     return agent

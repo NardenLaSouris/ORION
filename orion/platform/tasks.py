@@ -136,6 +136,7 @@ class TaskType:
     user: bool = True  # programmable par vous
     module: bool = False  # programmable par le module propriétaire
     personal: bool = False  # paramètres et résultat personnels : scellés (lot F4), refusés sans la clé
+    heavy: bool = False  # tâche lourde (import, EVOLVE) : attend un mini-PC disponible (lot F5)
 
     @property
     def owner(self) -> str:
@@ -276,6 +277,7 @@ class TaskService:
                  instance: str | None = None, max_backoff: float = MAX_BACKOFF, batch: int = 20):
         self._store, self._permissions, self._clock = store, permissions, clock
         self.sealer = Sealer()  # lot F4 : branché par la fondation quand la base personnelle est configurée
+        self.busy: Callable[[], str] = lambda: ""  # lot F5 : raison de différer une tâche lourde, ou ""
         self._ledger = permissions.ledger
         self.instance = instance or secrets.token_hex(6)  # propriétaire des bails de ce processus
         self._types: dict[str, TaskType] = {}
@@ -290,13 +292,13 @@ class TaskService:
 
     def register(self, kind: str, handler: Callable[[TaskRun], Any], capability: Capability | str, *,
                  idempotent: bool = False, timeout: float = 300.0, user: bool = True, module: bool = False,
-                 personal: bool = False) -> None:
+                 personal: bool = False, heavy: bool = False) -> None:
         if not KIND.match(kind or ""):
             raise TaskError(f"type de tâche invalide : {kind!r} (« module.action » attendu)")
         if kind in self._types:
             raise TaskError(f"type de tâche déjà enregistré : {kind}")
         self._types[kind] = TaskType(kind, handler, Capability(capability), idempotent, max(1.0, float(timeout)),
-                                     user, module, personal)
+                                     user, module, personal, heavy)
 
     def types(self) -> list[str]:
         return sorted(self._types)
@@ -386,6 +388,8 @@ class TaskService:
                 break
             if self._locked_out(row["kind"]):  # tâche personnelle sans la clé : elle attend la clé, intacte
                 continue
+            if self._deferred(row["kind"]):  # tâche lourde, mini-PC occupé : elle attend, sans échec ni essai perdu
+                continue
             outcome = self._run(self._task(row), now)
             if outcome:
                 outcomes.append((row["id"], outcome))
@@ -403,6 +407,19 @@ class TaskService:
                 text = self.sealer.open(row[name], f"tasks:{row['id']}:{name}")
                 row[name] = "{}" if text is None else text
         return Task.from_row(row)
+
+    def _deferred(self, kind: str) -> bool:
+        task_type = self._types.get(kind)
+        if not (task_type and task_type.heavy):
+            return False
+        try:
+            reason = self.busy()
+        except Exception:  # noqa: BLE001 - état illisible : on n'empêche rien
+            log.exception("Tâches : état des ressources illisible")
+            return False
+        if reason:
+            log.debug("Tâche lourde %s différée : %s", kind, reason)
+        return bool(reason)
 
     def _locked_out(self, kind: str) -> bool:
         task_type = self._types.get(kind)

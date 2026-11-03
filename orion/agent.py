@@ -365,6 +365,7 @@ class Agent:
         # Un fil par canal écrit (« message » : Linphone, « wallpaper » : fond d'écran) : (historique, dernier usage).
         self._threads: dict[str, tuple[list[Message], float]] = {}
         self._inbox = inbox  # demandes écrites depuis le fond d'écran (jarvis.wallpaper.inbox)
+        self.conversing = False
         self._trace_base, self._trace_turn = "", 0  # corrélation : conversation en cours, numéro de la phrase
         self._services = services
         self.last_sources: list[dict] = []
@@ -403,6 +404,7 @@ class Agent:
         CRASH_WINDOW secondes) arrêtent le service, que systemd redémarre (Restart=on-failure)."""
         crashes: list[float] = []
         while self._wait_for_wake_word():
+            self.conversing = True  # tâches lourdes différées pendant ce temps (service de ressources, lot F5)
             try:
                 self._conversation()
             except Exception:
@@ -413,6 +415,8 @@ class Agent:
                 if len(crashes) > MAX_CRASHES:
                     raise
                 self._recover()
+            finally:
+                self.conversing = False
         log.info("Source audio épuisée, arrêt.")
 
     def _recover(self) -> None:

@@ -413,6 +413,8 @@ class PlatformConfig:
     personal: bool = False
     personal_database: Path = Path("data/orion_personal.db")
     data_key: str = "orion.data_key"
+    # Lot F5 : NAS facultatif, monté sur le mini-PC (SMB, NFS…) ; vide : aucun. Rien d'opérationnel n'y est rangé.
+    nas_path: str = ""
 
 
 @dataclass(frozen=True)

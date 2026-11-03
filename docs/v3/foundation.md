@@ -1,4 +1,4 @@
-# CORE FOUNDATION — lots F1 à F4 : permissions, autonomie, registre, tâches, événements, stockage chiffré
+# CORE FOUNDATION — lots F1 à F5 : permissions, autonomie, registre, tâches, événements, stockage chiffré
 
 F1 et F2 livrés sur `v3` le 2 novembre 2026, jamais déployés (F2 : § « Lot F2 » plus bas). Inactif par défaut (`[platform] enabled = false`) : la V2 et les
 modules v3 se comportent alors exactement comme avant.
@@ -609,3 +609,79 @@ rangée par `systemd-creds` (demande `sudo`), puis la clé factice est retirée.
    F5 prévoit les comptes séparés (`orion-import`, `orion-evolve`), qui n'y auront pas accès.
 6. **Rotation et dédoublonnage** : après une rotation, un événement identique à un autre publié juste avant n'est
    plus reconnu comme doublon (étiquette d'une autre clé). La fenêtre est de 12 heures.
+
+# Lot F5 : ressources, mode dégradé, comptes séparés
+
+## Service de ressources (`orion/platform/resources.py`)
+
+| Ressource | Sonde | Sans elle |
+|---|---|---|
+| `llm.primary` (Katana) | état du LLM à secours (`degraded`) | Core : LLM de secours du mini-PC, puis règles. NEWS : synthèses simples. WATCH : demandes comprises par règles. EVOLVE : diagnostic par règles |
+| `stt.gpu` (Katana) | connexion TCP à `[stt] remote` | Whisper local, plus lent |
+| `agent.pc`, `agent.portable` | connexion TCP à l'agent | actions sur ce PC refusées avec une explication |
+| `web.search` (SearXNG) | connexion TCP | Core : « je ne peux pas chercher ». WATCH : flux et pages déclarés seulement |
+| `storage.nas` (facultatif) | dossier `[platform] nas_path` présent et inscriptible | aucun effet : rien d'opérationnel sur le NAS ; sauvegardes chiffrées vers un autre dossier |
+
+- `available(nom)` : réponse gardée quelques secondes à quelques minutes selon la ressource. La sonde tourne dans un
+  fil borné à 3 s : un partage réseau figé ne bloque jamais ORION. Une sonde en erreur, une ressource inconnue ou non
+  configurée valent « indisponible ».
+- Chaque passage de disponible à indisponible (et retour) est daté et journalisé ; ORION Control (vue Autonomie,
+  « Ressources ») montre l'état, depuis quand, et ce que fait chaque partie d'ORION sans la ressource.
+- `busy()` : conversation en cours (`Agent.conversing`), processeur au-delà de 85 % ou mémoire disponible sous 15 %.
+  Une tâche déclarée `heavy=True` (imports, EVOLVE niveau 2) attend alors dans `TaskService`. Elle ne compte ni un
+  échec ni un essai.
+- Route `GET /api/resources`.
+- NAS : n'importe quel modèle et protocole, du moment qu'il est monté comme un dossier. Aucun n'est configuré
+  (`nas_path` vide : « non configuré »).
+
+## Tests « ressource absente »
+
+- **Core** : LLM principal hors ligne, transcription non configurée, Web coupé, NAS absent. Le service de ressources
+  répond pour chacune, chaque ressource déclare son comportement de repli, et la fondation démarre
+  (`test_platform_resources.py`). Démarrage et conversation réels sans NAS ni transcription GPU : environnement V3
+  (`/discuter`).
+- **NEWS** : sans LLM, la collecte, le regroupement, le score, les alertes (`test_news.py`, mode dégradé) et le
+  journal (fiches résumées par la source) fonctionnent.
+- **WATCH** : sans Web, la source `web` n'est pas créée, et les sources déclarées restent. Une source en panne
+  marque sa surveillance « en échec », puis la reprise la relance (`test_watch.py`).
+- **EVOLVE** : sans LLM, l'analyse du journal se fait par règles.
+- **PURCHASE** : aucune ressource extérieure (bac à sable).
+
+## Zones d'attente (`orion/platform/staging.py`)
+
+Les comptes `orion-import` et `orion-evolve` ne touchent ni aux bases, ni au dépôt en service, ni à la clé. Ils
+déposent des **lots** :
+- un fichier JSON, déposé de façon atomique (nom provisoire, puis renommage) ;
+- son contenu : type déclaré, source, date, éléments et empreinte SHA-256 des éléments.
+
+Le Core vérifie chaque lot. Il refuse :
+- tout ce qui n'est pas un fichier ordinaire (lien symbolique compris) ;
+- un fichier déposé par un autre propriétaire que le compte de la zone ;
+- plus de 5 Mo ou plus de 5000 éléments ;
+- un format inconnu, un type non déclaré, une empreinte fausse, un élément hors schéma.
+
+Un lot refusé va en quarantaine avec sa raison, jamais supprimé. Un lot accepté est remis à son destinataire, puis
+rangé dans `done/`. Si le destinataire ne peut pas le prendre (base personnelle verrouillée), le lot attend, intact.
+
+## Comptes `orion-import` et `orion-evolve` (`deploy/v3_accounts.sh`, **non installés**)
+
+- Comptes système sans connexion, dans aucun groupe d'ORION.
+- Zones : `/var/lib/orion-v3/staging/import` et `/var/lib/orion-v3/staging/evolve` (2770). Seul le compte de la
+  zone y écrit ; `orion-v3` les lit par leur groupe et range les lots traités (`ReadWritePaths` dans un ajout à son
+  unité).
+- Espace de travail d'EVOLVE : `/var/lib/orion-v3/evolve` (700).
+- Contrôle en fin de script : ni l'un ni l'autre ne lit les données V3, la base personnelle, le `.env`, les
+  identifiants chiffrés ou la production. Aucun des deux ne lit la zone de l'autre.
+- Essai complet en conteneur hors réseau : création, contrôles, dépôt par `orion-import`, lecture et rangement par
+  `orion-v3`, écriture refusée à `orion-evolve` dans la zone d'import, relance idempotente.
+- Installation : votre décision, plus tard (`sudo bash /home/user/orion-v3/deploy/v3_accounts.sh`). Rien ne l'utilise
+  encore : les imports (Takeout) attendent votre accord, et EVOLVE niveau 2 attend SENTINEL.
+
+## Écarts et risques résiduels (F5)
+
+1. Les sondes des agents et de la transcription vérifient une connexion TCP, pas le service lui-même (jeton,
+   modèle chargé). Un service ouvert mais en erreur reste « disponible » ; l'erreur est alors traitée par le
+   composant, qui a déjà son propre repli (Whisper local, message d'erreur de l'agent).
+2. `busy()` regarde la charge moyenne sur une minute : un pic court ne diffère pas une tâche lourde déjà commencée.
+3. Le planificateur des modules ne consulte pas encore `busy()`. Ses tâches sont courtes, mais une collecte NEWS peut
+   tomber pendant une conversation.

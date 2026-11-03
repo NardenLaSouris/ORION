@@ -105,7 +105,7 @@ class Bridge:
         if route[:1] == ["modules"] and method in ("GET", "POST", "PUT", "DELETE"):
             return c.module(method, route[1:], query, data)
         if route[:1] in (["autonomy"], ["ledger"], ["grants"], ["tasks"], ["confirmations"], ["events"],
-                          ["personal"]) and method in ("GET", "POST", "DELETE"):
+                          ["personal"], ["resources"]) and method in ("GET", "POST", "DELETE"):
             return c.platform(method, route, query, data)
         raise LookupError("/".join(route))
 

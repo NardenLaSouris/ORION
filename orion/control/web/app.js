@@ -753,6 +753,7 @@
       api("GET", "/ledger/verify"), api("GET", "/grants"), api("GET", "/tasks"), api("GET", "/confirmations"),
       api("GET", "/events/missed"), api("GET", "/events?limit=40"),
       api("GET", "/personal").catch(() => ({ state: "inconnue", reason: "Core sans lot F4" }))]);
+    const resources = await api("GET", "/resources").catch(() => null);
     const eventAction = async (e, verb, done) => {
       await act(api("POST", `/events/${encodeURIComponent(e.id)}/${verb}`), done);
       show("autonomy");
@@ -795,6 +796,15 @@
         button("Arrêt d'urgence", () => set("emergency_stop"), "danger")),
       el("p", { class: "muted small" }, "Suspendue : plus aucune initiative des modules ; vos tâches programmées continuent. "
         + "Arrêt d'urgence : plus aucune action autonome. La voix peut suspendre ou arrêter, jamais réactiver."),
+      el("h2", {}, "Ressources"),
+      resources ? table(["Ressource", "État", "Depuis", "Sans elle"], resources.resources.map((r) => [
+        el("span", { title: r.detail || "" }, r.label),
+        r.available === null ? "jamais vérifiée" : r.available ? "disponible" : `indisponible — ${r.detail}`,
+        stamp(r.since), r.without.map((w) => `${w.module} : ${w.behaviour}`).join(" · ") || "—"]), "Aucune ressource déclarée.")
+        : el("div", { class: "empty" }, "Core sans lot F5."),
+      resources ? el("p", { class: "muted small" }, `Mini-PC : processeur ${resources.load.cpu !== undefined ? Math.round(resources.load.cpu * 100) + " %" : "?"}, `
+        + `mémoire disponible ${resources.load.memory_available !== undefined ? Math.round(resources.load.memory_available * 100) + " %" : "?"}`
+        + (resources.busy ? ` — tâches lourdes différées (${resources.busy})` : " — tâches lourdes permises")) : "",
       el("h2", {}, "Autorisations"),
       table(["Principal", "Capacité", "Limites", "Échéance", "État", ""], grants.map((g) => [g.principal, g.capability,
         JSON.stringify(g.limits), stamp(g.expires_at), g.revoked_at ? `révoquée ${stamp(g.revoked_at)}` : "valide",

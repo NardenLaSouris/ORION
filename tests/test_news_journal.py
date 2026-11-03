@@ -201,7 +201,8 @@ def test_journal_reads_no_personal_data():
 
 @pytest.mark.parametrize("text, number", [("Approfondis la deuxième", 2), ("parle-moi de la 3", 3),
                                           ("détaille l'information numéro 4", 4), ("et la dernière ?", -1),
-                                          ("la 1re", 1), ("parle-moi de la BCE", None), ("il y a 12 morts", None)])
+                                          ("la 1re", 1), ("parle-moi de la BCE", None), ("il y a 12 morts", None),
+                                          ("Approfondis la deuxième la dernière ?", -1)])  # relance composée
 def test_the_item_number_comes_from_the_words_never_from_the_llm(text, number):
     from orion.news.tools import ordinal
 

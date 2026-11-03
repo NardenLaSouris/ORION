@@ -25,9 +25,11 @@ ORDINALS = {"premiere": 1, "premier": 1, "deuxieme": 2, "seconde": 2, "second": 
 
 def ordinal(text: str) -> int | None:
     """Numéro d'une information d'après les mots de la demande (« la deuxième », « la 3 », « numéro 4 »,
-    « la dernière » : -1) ; jamais deviné par le LLM, qui écrirait un chiffre absent de la demande."""
+    « la dernière » : -1) ; jamais deviné par le LLM, qui écrirait un chiffre absent de la demande. Le dernier
+    mentionné l'emporte : une relance (« et la dernière ? ») complète la demande précédente."""
     words = plain(text).split()
-    for i, word in enumerate(words):
+    for i in range(len(words) - 1, -1, -1):
+        word = words[i]
         if word in ORDINALS:
             return ORDINALS[word]
         match = re.fullmatch(r"(\d{1,2})(?:e|er|re|eme)?", word)

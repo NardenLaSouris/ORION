@@ -68,10 +68,38 @@ def misleading(story: pl.Story, articles: list[pl.Article]) -> str:
     if loud and not story.confirmed:
         return "titre à sensation, sans source qui le confirme"
     body = " ".join(f"{a.summary} {a.title}" for a in articles if a is not lead) + " " + lead.summary
-    missing = pl.numbers(title) - pl.numbers(body)
+    missing = claims(title) - pl.numbers(body)
     if missing and lead.summary and not story.confirmed:
         return f"chiffre du titre absent de l'article ({', '.join(sorted(missing))})"
     return ""
+
+
+# Chiffre qui porte une affirmation (« 12 % », « 300 morts », « 5 milliards ») : les dates et les années, que les
+# résumés RSS courts omettent souvent, ne comptent pas (constaté sur les vrais flux le 3 novembre 2026).
+CLAIM = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:%|€|\$|pour ?cent|morts?|tués?|blessés?|victimes?|millions?|milliards?"
+                   r"|fois|euros?|dollars?)", re.IGNORECASE)
+
+
+def claims(text: str) -> set[str]:
+    return {n.replace(",", ".") for n in CLAIM.findall(text)}
+
+
+def subject(title: str) -> str:
+    """Sujet annoncé avant les deux-points (« Midterms : … »), sans pictogramme ni mention de rubrique."""
+    head, sep, _ = title.partition(":")
+    if not sep:
+        return ""
+    words = [w for w in plain(head).split() if w.isalpha() and w not in ("direct", "reportage", "enquete", "info",
+                                                                          "video")]
+    return " ".join(words) if 0 < len(words) <= 4 else ""
+
+
+def same_subject(a: pl.Story, b: pl.Story) -> bool:
+    """Deux événements que le regroupement a séparés mais qui traitent du même sujet le même jour : même sujet annoncé
+    et deux mots significatifs en commun au moins, ou des titres très proches."""
+    shared = len(a.tokens & b.tokens)
+    head = subject(a.title)
+    return (bool(head) and head == subject(b.title) and shared >= 2) or pl.jaccard(a.tokens, b.tokens) >= 0.5
 
 
 def best_article(articles: list[pl.Article]) -> pl.Article:
@@ -118,12 +146,22 @@ def plan(stories: list[pl.Story], articles_of, *, floor: int, previous: set[str]
             general.append(Pick(story, articles, RUBRIC_OF.get(story.category, "international"), WHY["general"]))
         else:
             filler.append(Pick(story, articles, RUBRIC_OF.get(story.category, "international"), WHY["filler"]))
-    picks = list(essential)  # toujours, même au-delà des quotas
+    picks: list[Pick] = []
+    for pick in essential:  # toujours, même au-delà des quotas ; une seule place par sujet
+        twin = next((p for p in picks if same_subject(p.story, pick.story)), None)
+        if twin is None:
+            picks.append(pick)
+        else:
+            result.excluded[pick.story.id] = f"même sujet que « {twin.story.title[:60]} »"
     counts: dict[str, int] = {}
 
     def take(pick: Pick) -> bool:
         if len(picks) >= max(MAX_ITEMS, len(essential)) or counts.get(pick.rubric, 0) >= PER_RUBRIC \
-                or pick in picks:
+                or any(p.story.id == pick.story.id for p in picks):
+            return False
+        twin = next((p for p in picks if same_subject(p.story, pick.story)), None)
+        if twin is not None:  # une seule place par sujet : la plus importante, déjà prise
+            result.excluded[pick.story.id] = f"même sujet que « {twin.story.title[:60]} »"
             return False
         picks.append(pick)
         counts[pick.rubric] = counts.get(pick.rubric, 0) + 1

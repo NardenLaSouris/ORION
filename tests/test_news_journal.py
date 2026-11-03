@@ -97,6 +97,18 @@ def test_a_confirmed_story_keeps_its_title_and_a_number_absent_from_the_text_is_
     lone = story("n", "economie", 60, domains={"n.test": "media"}, title="Le chômage grimpe à 12 %")
     assert "12" in br.misleading(lone, [article(lone, summary="Le chômage progresse selon l'Insee.")])
     assert br.misleading(lone, [article(lone, summary="Le chômage atteint 12 % selon l'Insee.")]) == ""
+    dated = story("d", "france", 60, domains={"d.test": "media"}, title="Budget 2026 : le vote reporté au 17 novembre")
+    assert br.misleading(dated, [article(dated, summary="Le gouvernement reporte le vote.")]) == ""  # date, année
+
+
+def test_one_place_per_subject_even_when_clustering_kept_two_events():
+    a = story("m1", "geopolitique", 51, title="Midterms 2026 : les Américains appelés aux urnes pour un vote")
+    b = story("m2", "geopolitique", 50, title="🔴 Midterms : plus de 58 millions d'électeurs ont voté, le vote continue")
+    c = story("ir", "geopolitique", 49, title="Iran : nouvelles frappes sur Qechm")
+    for s in (a, b, c):
+        s.tokens = pl.tokens(s.title)
+    result = br.plan([a, b, c], articles_of, floor=30)
+    assert [p.story.id for p in result.picks] == ["m1", "ir"] and "même sujet" in result.excluded["m2"]
 
 
 # --- Fiche --------------------------------------------------------------------------------------------------

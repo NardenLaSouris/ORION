@@ -129,8 +129,10 @@ class DiscordEngine(BaseModule):
         """Ce qui marche maintenant (et sinon pourquoi), pour ORION Control et les réponses."""
         if agent != ONLINE:
             why = "agent du PC hors ligne"
-        elif remote.get("discord") != "connecté":
+        elif remote.get("discord") != "connecté" and remote.get("auth") != "identifiant refusé":
             why = "Discord fermé sur le PC" if remote.get("discord") != "ouvert" else "application ORION non configurée"
+        elif remote.get("auth") == "identifiant refusé":
+            why = "identifiant de l'application refusé par Discord"
         elif remote.get("auth") != "lié":
             why = "ORION non autorisé dans Discord"
         else:
@@ -287,6 +289,8 @@ class DiscordEngine(BaseModule):
         if exc.code == "discord_not_configured":
             return ("Discord est ouvert, mais l'application ORION n'est pas encore configurée sur l'agent "
                     "(voir docs/v3/discord.md).")
+        if exc.code == "discord_bad_client_id":
+            return "Discord ne reconnaît pas l'identifiant de l'application ORION : vérifiez DISCORD_CLIENT_ID."
         if exc.code == "discord_unlinked":
             return "ORION n'est pas encore autorisé dans Discord : reliez-le depuis ORION Control."
         return exc.message
@@ -304,6 +308,9 @@ class DiscordEngine(BaseModule):
                     "Discord fermé sur le PC": "Discord n'est pas ouvert sur le PC.",
                     "application ORION non configurée": "Discord est ouvert, mais l'application ORION n'est pas "
                                                         "encore configurée sur l'agent.",
+                    "identifiant de l'application refusé par Discord": "Discord ne reconnaît pas l'identifiant de "
+                                                                       "l'application ORION : vérifiez "
+                                                                       "DISCORD_CLIENT_ID.",
                     }.get(ready["reason"], "ORION n'est pas encore autorisé dans Discord : reliez-le depuis "
                                            "ORION Control.")
         voice = state["voice"]

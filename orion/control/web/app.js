@@ -937,6 +937,15 @@
   // Discord : état lu sur l'agent Windows V3 (rafraîchi toutes les 5 s) ; chaque bouton est une commande explicite.
   let discordTimer = null;
 
+  // Ce qu'il reste à faire, selon ce qui manque (docs/v3/discord.md § 5).
+  const DISCORD_HELP = {
+    "application ORION non configurée": "Sur le PC : powershell -ExecutionPolicy Bypass -File "
+      + "C:\\Users\\theju\\orion-v3\\deploy\\v3_discord_setup.ps1, puis « Relier ORION à Discord » ci-dessous.",
+    "identifiant de l'application refusé par Discord": "Vérifiez le Client ID : relancez deploy\\v3_discord_setup.ps1.",
+    "ORION non autorisé dans Discord": "Cliquez sur « Relier ORION à Discord », puis « Autoriser » dans Discord.",
+    "Discord fermé sur le PC": "Ouvrez Discord sur le PC : ORION s'y reconnecte seul.",
+  };
+
   async function discordView() {
     clearInterval(discordTimer);
     discordTimer = setInterval(() => { if (state.view !== "discord") clearInterval(discordTimer); else show("discord"); }, 5000);
@@ -953,7 +962,8 @@
       const banner = d.agent.state !== "en ligne"
         ? el("div", { class: "banner" }, `Agent Windows V3 hors ligne depuis ${stamp(d.agent.since)} : `
           + "Discord ne peut pas être piloté. Lancez l'agent V3 sur le PC (voir docs/v3/discord.md).")
-        : !ready ? el("div", { class: "banner" }, `Discord indisponible : ${d.capabilities.reason}.`) : null;
+        : !ready ? el("div", { class: "banner" }, `Discord indisponible : ${d.capabilities.reason}.`
+          + (DISCORD_HELP[d.capabilities.reason] ? ` ${DISCORD_HELP[d.capabilities.reason]}` : "")) : null;
       const people = voice ? voice.participants.map((p) => [p.name, p.mute ? "oui" : "non", p.deaf ? "oui" : "non"]) : [];
       const channels = el("div");
       const loadChannels = () => mod("discord", "/channels").then((r) => {

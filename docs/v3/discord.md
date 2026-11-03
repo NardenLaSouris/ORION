@@ -116,24 +116,27 @@ ORION Control, vue Discord -> /api/modules/discord/... -> même module, même mo
 
 ## 5. Ce que vous devez faire (une fois)
 
-1. **Créer l'application Discord.** Sur https://discord.com/developers/applications : *New Application*, nommée par
-   exemple « ORION ». Aucun bot n'est à ajouter.
-2. **Déclarer l'adresse de retour.** *OAuth2*, puis *Redirects* : ajoutez exactement `http://localhost` et
-   enregistrez.
-3. **Récupérer les identifiants.** Sur la page *OAuth2*, copiez le *Client ID* et le *Client Secret* (*Reset Secret*
-   s'il n'est pas affiché).
-4. **Les écrire dans le fichier de l'agent.** Ouvrez `%LOCALAPPDATA%\ORION V3 Agent\.env` sur le PC et remplissez
-   ces deux lignes :
-   ```
-   DISCORD_CLIENT_ID=<Client ID>
-   DISCORD_CLIENT_SECRET=<Client Secret>
-   ```
-5. **Relancer l'agent V3.** `powershell -File C:\Users\theju\orion-v3\deploy\v3_agent.ps1`
-6. **Relier ORION.** Dans ORION Control V3, vue Discord, cliquez sur *Relier ORION à Discord*. Puis, **dans Discord**,
-   acceptez la fenêtre « ORION souhaite… » (*Autoriser*).
+Lancez sur le PC :
 
-Démarrage avec Windows (facultatif) : placez dans le dossier Démarrage (`shell:startup`) un raccourci vers
-`powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Users\theju\orion-v3\deploy\v3_agent.ps1`.
+```bash
+powershell -ExecutionPolicy Bypass -File C:\Users\theju\orion-v3\deploy\v3_discord_setup.ps1
+```
+
+Le script vous guide en quatre étapes :
+1. **Créer l'application.** Il ouvre le Developer Portal : *New Application*, nommée « ORION ». Dans *OAuth2*, puis
+   *Redirects*, ajoutez exactement `http://localhost`. Aucun bot n'est nécessaire.
+2. **Donner le Client ID.**
+3. **Donner le Client Secret.** Il est saisi masqué, jamais affiché ni journalisé. Le script l'écrit seulement dans
+   `%LOCALAPPDATA%\ORION V3 Agent\.env`, puis relance l'agent V3.
+4. **Relier ORION.** Dans ORION Control V3, vue Discord, cliquez sur *Relier ORION à Discord*. Puis, **dans
+   Discord**, acceptez la fenêtre « ORION souhaite… » (*Autoriser*).
+
+Un identifiant faux est signalé tel quel, dans ORION Control comme à la voix : « Discord ne reconnaît pas
+l'identifiant de l'application ORION ». C'est le refus réel de Discord (trame de fermeture, code 4000), constaté le
+4 novembre 2026.
+
+L'agent V3 démarre avec Windows : raccourci « ORION Agent V3 » du dossier Démarrage (`deploy\v3_agent_autostart.ps1`).
+Un superviseur le relance s'il s'arrête et refuse une seconde instance.
 
 ## 6. Limites
 

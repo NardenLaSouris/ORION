@@ -310,6 +310,9 @@ class DiscordLink:
         """Commande exécutée par le fil Discord ; RpcError si Discord est fermé, non lié, ou refuse."""
         if not self.configured():
             raise RpcError("discord_not_configured", "Application Discord non configurée sur l'agent.")
+        if self.state["auth"] == "identifiant refusé":
+            raise RpcError("discord_bad_client_id", "Discord ne reconnaît pas l'identifiant de l'application ORION "
+                                                    "(DISCORD_CLIENT_ID).")
         if self.state["discord"] != "connecté":
             raise RpcError("discord_closed", "Discord n'est pas ouvert sur le PC.")
         if self.state["auth"] != "lié":
@@ -391,8 +394,19 @@ class DiscordLink:
             self._stopping.wait(self.settings.retry_max)
             return
         self._send(HANDSHAKE, {"v": 1, "client_id": self.settings.client_id})
-        op, ready = self._recv()
-        if op == CLOSE or ready.get("evt") != "READY":
+        try:
+            op, ready = self._recv()
+        except RpcError as exc:
+            # Discord répond par une fermeture (code 4000 « Invalid Client ID ») : identifiant de l'application
+            # inconnu de Discord. Constaté sur le vrai client. État clair, nouvel essai espacé (la configuration
+            # doit d'abord être corrigée).
+            self._pipe.close()
+            self._pipe = None
+            self._set(discord="ouvert", auth="identifiant refusé", error=exc.message[:160])
+            log.warning("Discord : identifiant d'application refusé (%s)", exc.message)
+            self._stopping.wait(self.settings.retry_max)
+            return
+        if ready.get("evt") != "READY":
             raise RpcError("discord_refused", f"Discord a refusé la connexion ({ready.get('message', op)})")
         self._set(discord="connecté", error="")
         self._event("discord", {"state": "connecté"})

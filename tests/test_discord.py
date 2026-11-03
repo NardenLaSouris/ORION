@@ -668,3 +668,21 @@ def test_build_needs_an_agent_url_and_its_own_token(tmp_path, monkeypatch):
         assert "discord.deafened" in modules.contexts
     finally:
         modules.stop()
+
+
+def test_an_unknown_client_id_is_reported_clearly_like_the_real_discord_does(fake, tmp_path):
+    """Vrai Discord (essai du 4 novembre) : poignée de main avec un identifiant inconnu -> trame CLOSE, code 4000."""
+    link = DiscordLink(LinkSettings("999", "secret-de-test", "", tmp_path, retry_max=0.2), connect=fake.connect,
+                       tokens=TokenBox(tmp_path / "t.bin", PLAIN))
+    link.start()
+    try:
+        assert wait(lambda: link.snapshot()["auth"] == "identifiant refusé")
+        assert "Invalid Client ID" in link.snapshot()["error"] and link.snapshot()["discord"] == "ouvert"
+        with pytest.raises(Exception) as err:
+            link.request("GET_VOICE_SETTINGS")
+        assert err.value.code == "discord_bad_client_id"
+    finally:
+        link.stop()
+    engine = DiscordEngine(FakeAgent(), settings=DiscordSettings())
+    caps = engine.capabilities("en ligne", {"discord": "ouvert", "auth": "identifiant refusé"})
+    assert caps["reason"] == "identifiant de l'application refusé par Discord"

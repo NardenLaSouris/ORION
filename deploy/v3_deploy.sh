@@ -20,6 +20,7 @@ REF=${1:-v3-sync}
 PROD_PORTS="8765 8766 8767 8770"
 LOG=$HOME/sauvegardes/orion-v3/deploiements.log
 PY=$TARGET/.venv/bin/python
+HERE=$(cd "$(dirname "$0")/.." && pwd)  # copie qui porte ce script (le premier déploiement n'a pas encore les outils)
 
 die() { echo "ARRÊT : $*" >&2; exit 2; }
 
@@ -46,7 +47,7 @@ git -C "$TARGET" merge-base --is-ancestor "$before" "$after" || die "$REF ne des
 
 # --- 2. Sauvegarde -----------------------------------------------------------------------------------------------
 mkdir -p "$(dirname "$LOG")"
-"$PY" "$TARGET/scripts/v3_backup.py" backup --data "$TARGET/data" --out "$HOME/sauvegardes/orion-v3" --keep 14
+"$PY" "$HERE/scripts/v3_backup.py" backup --data "$TARGET/data" --out "$HOME/sauvegardes/orion-v3" --keep 14
 
 # --- 3. Code ------------------------------------------------------------------------------------------------------
 git -C "$TARGET" merge -q --ff-only FETCH_HEAD

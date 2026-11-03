@@ -145,3 +145,19 @@ def test_install_script_guards():
     bash = shutil.which("bash")
     if bash:
         assert subprocess.run([bash, "-n", str(ROOT / "deploy" / "v3_env.sh")]).returncode == 0
+
+
+def test_network_isolation_rules_cover_every_production_port():
+    rules = (ROOT / "deploy" / "v3_isolation.nft").read_text(encoding="utf-8")
+    assert 'meta skuid "orion-v3"' in rules and "8765, 8766, 8767, 8770" in rules
+    assert "127.0.0.0/8" in rules and "192.168.1.91" in rules and "::1" in rules  # boucle locale et réseau
+    assert "192.168.1.128, 192.168.1.73" in rules  # agents de la production
+    lines = " ".join(line for line in rules.splitlines() if "meta skuid" in line)
+    assert "11434" not in lines and "8080" not in lines  # Ollama et SearXNG restent joignables
+    script = (ROOT / "deploy" / "v3_isolation.sh").read_text(encoding="utf-8")
+    assert "ExecStartPre=+/usr/sbin/nft -f /etc/orion-v3/isolation.nft" in script  # sans règles, pas de service
+    assert "OOMScoreAdjust=500" in script and "MemoryMax=3G" in script and "CPUWeight=50" in script
+    import re
+
+    assert re.search(r"systemctl \w+ orion(\s|$)", script, re.M) is None  # jamais le service de production
+    assert "/opt/orion/" not in script.replace("/opt/orion-v3", "")

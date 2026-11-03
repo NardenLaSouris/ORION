@@ -120,3 +120,66 @@ sudo ufw delete allow proto tcp from 192.168.1.73 to any port 8865:8867
 
 Le dossier `/opt/orion-v3` et le compte `orion-v3` peuvent ensuite être retirés à la main ; seules des données
 fictives s'y trouvent.
+
+## 3. Audit d'isolation V2/V3 (3 novembre 2026)
+
+Contrôles en lecture seule sur le mini-PC, et lecture du code. La production n'a été ni lue en profondeur, ni
+sollicitée, ni modifiée.
+
+### Conforme
+
+| Point | Constat |
+|---|---|
+| Comptes | `orion-v3` n'appartient qu'à son groupe ; `orion` (production) n'est pas dans `orion-v3`. |
+| Fichiers de la production | `/opt/orion`, `/opt/jarvis` : 750, groupe `orion` ; `/var/lib/orion`, `/var/lib/orion-call` : 700 ; `/etc/orion-call` : 750. Aucun fichier sensible lisible par tous (recherche de `.env`, jetons, bases). |
+| Fichiers de la V3 | `/opt/orion-v3` : 750, groupe `orion-v3` ; la production ne peut pas la lire. |
+| Service V3 | `ProtectSystem=strict`, `ProtectHome` (sauvegardes de `/home/user` masquées), `PrivateTmp`, `PrivateDevices`, `NoNewPrivileges`, aucune capacité ; production masquée (`InaccessiblePaths`). |
+| Journaux | `orion-v3` n'est ni dans `adm` ni dans `systemd-journal` : il ne lit pas le journal de la production. |
+| Secrets | Jeton V3 généré à l'installation ; aucun secret de la production dans `/opt/orion-v3`. Clé des données personnelles absente. |
+| Identifiants systemd | `/etc/credstore*` : 700 root. |
+| Droits sudo | `user` ne peut redémarrer sans mot de passe que `orion-v3` (règle à part). |
+| Ports | V3 sur 8865 à 8867, ouverts dans `ufw` au PC et au Katana seulement ; API V3 : 401 sans jeton. |
+| Ollama partagé | même `keep_alive` que la production : la V3 ne fait jamais décharger ses modèles. |
+
+### Écarts trouvés et correction préparée
+
+1. **Réseau local : le fond d'écran de la production autorise toujours `127.0.0.1`** (`orion/wallpaper/server.py`).
+   - Tout processus du mini-PC, donc un service V3 compromis, pourrait lire les statistiques de la production
+     (agenda, rappels) et obtenir son jeton de page. Il pourrait alors lancer les commandes rapides (lumières,
+     Spotify, suppression d'un rappel).
+   - L'API de la production autorise aussi `127.0.0.1`, mais exige son jeton.
+   - Le code V3 ne contacte jamais ces ports ; le risque suppose un code V3 défaillant ou malveillant.
+   - Corriger la production est hors périmètre : elle est intouchable.
+   - **Correction préparée** : `deploy/v3_isolation.nft`. Des règles nftables par compte refusent à `orion-v3`
+     les ports 8765, 8766, 8767 et 8770 du mini-PC, par la boucle locale comme par son adresse réseau. Elles
+     refusent aussi les agents du PC et du Katana (8765, 8766).
+   - Ollama et SearXNG restent joignables.
+2. **Aucune limite de ressources sur `orion-v3`.** Un emballement de la V3 pouvait priver la production de mémoire,
+   et le noyau aurait pu tuer la production plutôt que la V3.
+   - **Correction préparée** : `MemoryHigh=2G`, `MemoryMax=3G`, `MemorySwapMax=512M`, `OOMScoreAdjust=500` (la V3
+     est sacrifiée la première), `CPUWeight=50`, `IOWeight=50`, `TasksMax=512`.
+3. `/opt/jarvis` (ancienne copie de la production) n'était protégé que par ses droits ; il est désormais aussi masqué
+   au service.
+
+Tout est appliqué par `sudo bash /home/user/orion-v3/deploy/v3_isolation.sh`.
+- Le script est idempotent et ne touche jamais à la production.
+- Il recharge les règles à chaque démarrage d'`orion-v3` (`ExecStartPre`) : sans elles, le service ne démarre pas.
+- Il vérifie le résultat à la fin : chaque port de la production doit être « bloqué » pour `orion-v3`, et Ollama
+  doit rester « joint ».
+- Essai en conteneur isolé du réseau :
+  - sans les règles, `orion-v3` joint un faux 8767 ;
+  - avec les règles, il est bloqué sur 8766, 8767 et 8770, et joint toujours 11434 ;
+  - un autre compte n'est pas affecté ;
+  - le rechargement est idempotent.
+- `deploy/v3_env.sh` l'appelle désormais, pour une réinstallation.
+
+**État : demande `sudo` du propriétaire ; pas encore appliqué sur le mini-PC.**
+
+### Risques acceptés
+
+- Le compte `user` (administrateur) appartient aux groupes `orion` et `orion-v3`, et au groupe `docker`
+  (équivalent root). Sa compromission toucherait les deux environnements ; c'est le compte d'administration.
+- Le visage (8765 et 8865) n'a pas de filtre d'adresse dans le code ; `ufw` le limite au PC et au Katana. Il
+  n'affiche qu'un état d'animation.
+- La V3 et la production partagent le processeur du mini-PC et du Katana (LLM) ; les limites ci-dessus
+  donnent la priorité à la production sur le mini-PC.

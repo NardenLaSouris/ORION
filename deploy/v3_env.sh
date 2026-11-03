@@ -124,6 +124,7 @@ echo "   $ACCOUNT ne peut pas lire $PROD."
 
 systemctl daemon-reload
 systemctl enable --now orion-v3
+bash "$DEST/deploy/v3_isolation.sh"  # règles réseau et limites de ressources (audit d'isolation)
 sleep 3
 systemctl --no-pager --lines=0 status orion-v3 || true
 echo "Terminé. Conversation : http://192.168.1.91:8867/discuter ; journaux : journalctl -u orion-v3"

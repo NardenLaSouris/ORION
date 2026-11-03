@@ -514,6 +514,11 @@ allowed_ips = []
 # clavier n'arrive pas au fond d'écran de Wallpaper Engine.
 actions = true
 chat = false
+# Poids d'ORION et coût de production estimé (panneau « Cœur ») : tokens des sessions de développement relevés par
+# `python scripts/production_stats.py --out data/production_stats.json` (sur le PC où tournent ces sessions), et
+# heures réellement travaillées sur ORION dans ces sessions, au taux horaire d'un salaire net dev_net_monthly.
+dev_net_monthly = 3000.0
+usd_eur = 0.9
 
 [face]
 # Visage graphique animé (page Web locale). Non critique : si le port est pris ou la page fermée,

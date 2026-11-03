@@ -353,6 +353,11 @@ class WallpaperConfig:
     # coupées par défaut : Wallpaper Engine ne transmet pas le clavier au fond d'écran.
     actions: bool = True
     chat: bool = False
+    # Coût de production (orion/wallpaper/project.py) : tokens et heures de travail relevés par
+    # scripts/production_stats.py, heures payées au taux d'un développeur à dev_net_monthly euros nets par mois.
+    production_stats: Path = Path("data/production_stats.json")
+    dev_net_monthly: float = 3000.0  # salaire net mensuel d'un développeur Python confirmé (France)
+    usd_eur: float = 0.9  # conversion du coût des tokens (tarif en dollars)
 
 
 @dataclass(frozen=True)

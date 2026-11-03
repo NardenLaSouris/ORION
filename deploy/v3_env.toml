@@ -95,6 +95,10 @@ chat = true
 
 [platform]
 enabled = true
+# Base personnelle chiffrée (lot F4). Clé : identifiant systemd orion-v3.data_key, jamais créée par l'installation ;
+# sans elle, la base reste verrouillée et les textes personnels ne sont jamais écrits (docs/v3/foundation.md).
+personal = true
+data_key = "orion-v3.data_key"
 
 [watch]
 enabled = true

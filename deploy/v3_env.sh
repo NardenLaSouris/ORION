@@ -76,6 +76,9 @@ PrivateTmp=yes
 PrivateDevices=yes
 ReadWritePaths=$DEST/data $DEST/models/whisper
 InaccessiblePaths=-$PROD -/etc/orion-call -/var/lib/orion -/var/lib/orion-call
+# Clé des données personnelles (lot F4), si elle existe un jour : /etc/credstore.encrypted/orion-v3.data_key
+# (systemd-creds encrypt). Absente : la base personnelle reste verrouillée, le service démarre quand même.
+ImportCredential=orion-v3.data_key
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

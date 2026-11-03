@@ -79,6 +79,7 @@ def test_v3_template_isolates_from_production(tmp_path):
     assert cfg.wallpaper.chat and not cfg.wallpaper.actions and not cfg.face.open_browser
     assert cfg.platform.enabled and cfg.news.enabled and cfg.watch.enabled
     assert cfg.purchase.sandbox
+    assert cfg.platform.personal and cfg.platform.data_key == "orion-v3.data_key"  # jamais la clé de la production
 
 
 def test_wake_word_is_never_computed_on_a_silent_source():
@@ -137,6 +138,7 @@ def test_install_script_guards():
     script = (ROOT / "deploy" / "v3_env.sh").read_text(encoding="utf-8")
     assert "InaccessiblePaths=-$PROD" in script and "existe déjà : rien n'est modifié" in script
     assert "visudo -cqf" in script and "peut lire la production" in script
+    assert "ImportCredential=orion-v3.data_key" in script and "data_key\" >" not in script  # aucune clé créée
     # La production n'est que lue (environnement Python, modèles) : jamais son .env ni ses données.
     assert "$PROD/.env\" ]" not in script and "cp -a \"$PROD/data" not in script
     assert "$PROD/.env" in script.split("Contrôle de l'isolation")[1]  # seulement pour vérifier qu'il est illisible

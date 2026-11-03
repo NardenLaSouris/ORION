@@ -232,7 +232,8 @@ class CoreApi:
                     return api.presence_action(method, route[1:], data)
                 if method == "POST" and route == ["call"]:
                     return api.call_action(data)
-                if route[:1] in (["autonomy"], ["ledger"], ["grants"], ["tasks"], ["confirmations"], ["events"]):
+                if route[:1] in (["autonomy"], ["ledger"], ["grants"], ["tasks"], ["confirmations"], ["events"],
+                                  ["personal"]):
                     if api.foundation is None:
                         return 404, {"status": "error", "error": "platform_disabled"}
                     # Ici, IP autorisée et jeton déjà vérifiés : la session d'ORION Control est authentifiée.

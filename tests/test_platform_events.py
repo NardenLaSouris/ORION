@@ -312,3 +312,50 @@ def test_control_api_lists_relaunches_and_dismisses():
     assert foundation.admin("POST", ["events", second, "dismiss"], {}, None, "s")[0] == 200
     events = foundation.admin("GET", ["events"], {}, None, "s")[1]["events"]
     assert any(e["type"] == "system.recap" for e in events)
+
+
+# --- Maison vide : rappels gardés, présentés au retour (décision du 3 novembre 2026) ----------------------------
+
+def test_a_reminder_in_an_empty_house_waits_for_your_return():
+    hub, _, speaker, clock = hub_world()
+    home = {"occupied": False}
+    hub.presence = lambda: home["occupied"]
+    out = hub.publish(reminder())
+    assert out.outcome == "awaiting_return" and speaker.said == []
+    clock.t += 600
+    assert hub.dispatch() == 0 and speaker.said == []  # toujours personne : rien n'est dit
+    home["occupied"] = True
+    assert hub.on_return() == 1 and speaker.said == ["Sortir le linge"]
+    assert hub.on_return() == 0 and speaker.said == ["Sortir le linge"]  # une seule fois
+
+
+def test_an_obsolete_reminder_is_never_replayed_at_return_but_stays_consultable():
+    hub, _, speaker, clock = hub_world()
+    hub.presence = lambda: False
+    hub.publish(reminder("Rendez-vous factice", ttl=1800))
+    clock.t += 3600
+    hub.presence = lambda: True
+    assert hub.on_return() == 0 and speaker.said == []
+    missed = hub.missed(include_obsolete=True)
+    assert [m["title"] for m in missed] == ["Rendez-vous factice"] and missed[0]["obsolete"]
+
+
+def test_unknown_presence_and_other_sources_keep_their_behaviour():
+    hub, _, speaker, _ = hub_world()
+    hub.presence = lambda: None  # inconnue : annoncé comme avant
+    assert hub.publish(reminder()).outcome == ANNOUNCE
+    hub.presence = lambda: False
+    assert hub.publish(mail()).outcome == ANNOUNCE  # les mails suivent leurs propres règles
+    assert speaker.said == ["Sortir le linge", "Facture EDF"]
+
+
+def test_leaving_before_a_deferred_reminder_is_due_keeps_it_for_your_return():
+    hub, _, speaker, clock = hub_world()
+    hub.policy = InterruptionPolicy("22:30", "08:00")  # sans exemption : le rappel est différé par les heures calmes
+    clock.t = NIGHT
+    assert hub.publish(reminder(clock=clock, ttl=12 * 3600)).outcome == DEFERRED
+    hub.presence = lambda: False
+    clock.t = datetime(2026, 11, 4, 8, 5).timestamp()
+    assert hub.dispatch() == 0 and speaker.said == []
+    hub.presence = lambda: True
+    assert hub.on_return() == 1 and speaker.said == ["Sortir le linge"]

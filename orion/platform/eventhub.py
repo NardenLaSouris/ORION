@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from orion.platform.store import Migration, Store, dumps, loads
+from orion.platform.vault import UNAVAILABLE, WITHHELD, Sealer
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +88,11 @@ PRIORITIES = ("low", "normal", "high", "critical")
 ANNOUNCE, DEFERRED, KEPT, DENIED, MISSED, EXPIRED, DUPLICATE = (
     "announce", "deferred", "kept", "denied", "missed", "expired", "duplicate")
 PENDING, SENT, FAILED, CANCELLED = "pending", "sent", "failed", "cancelled"
+WAITING = "waiting_return"  # remise retenue : maison vide, présentée à votre retour
+AWAITING = "awaiting_return"  # décision : gardé pour votre retour
+# Rappels et rendez-vous : jamais dits dans une maison vide ; gardés, présentés au retour s'ils sont encore valables
+# (décision du 3 novembre 2026). Les autres annonces suivent leurs propres règles (mails : présence exigée par la V2).
+RETURN_SOURCES = frozenset({"reminder", "calendar"})
 MISSED_OPEN, RELAUNCHED, DISMISSED = "missed", "relaunched", "dismissed"
 VOICE, WRITTEN, CALL = "voix", "écrit", "appel"
 HOME, AWAY, UNKNOWN = "home", "away", "unknown"
@@ -197,8 +203,14 @@ class Outcome:
 class EventHub:
     def __init__(self, store: Store, *, permit: Callable[..., Any] | None = None,
                  policy: InterruptionPolicy | None = None, clock: Callable[[], float] = time.time,
-                 now: Callable[[], datetime] | None = None, dedup_seconds: float = 12 * 3600.0):
+                 now: Callable[[], datetime] | None = None, dedup_seconds: float = 12 * 3600.0,
+                 sealer: Sealer | None = None):
         self._store, self._permit, self._clock = store, permit, clock
+        # Lot F4 : titre, texte et données d'un événement sont personnels (rappel, expéditeur d'un mail) : scellés
+        # avec la clé des données personnelles, ou retenus en mémoire seulement si elle manque.
+        self.sealer = sealer or Sealer()
+        self._held: dict[str, tuple[str, str, dict]] = {}
+        self.presence: Callable[[], bool | None] | None = None  # maison occupée ? None : inconnu
         self._now = now or (lambda: datetime.fromtimestamp(self._clock()))
         self.policy = policy or InterruptionPolicy()
         self._dedup = dedup_seconds
@@ -226,10 +238,13 @@ class EventHub:
             self._insert(event)
             outcome, reason, when = self._decide(event)
             planned = channels if outcome in (ANNOUNCE, DEFERRED) else ()
+            status = PENDING
+            if planned and self._empty_house(event.source):
+                outcome, reason, status = AWAITING, "maison vide : présenté à votre retour", WAITING
             self._decision(event.id, outcome, planned, reason)
             for name in planned:
                 self._store.write("INSERT INTO event_deliveries (event_id, channel, status, next_at) "
-                                  "VALUES (?, ?, ?, ?)", (event.id, name, PENDING, when))
+                                  "VALUES (?, ?, ?, ?)", (event.id, name, status, when))
         if planned and outcome == ANNOUNCE:
             self.dispatch(event_id=event.id)
         return Outcome(event.id, outcome, reason, tuple(planned))
@@ -267,15 +282,19 @@ class EventHub:
             return None
         row = self._store.one("SELECT id FROM events WHERE source = ? AND dedup_key = ? AND created_at >= ? "
                               "ORDER BY created_at DESC LIMIT 1",
-                              (event.source, event.dedup_key, event.created_at - self._dedup))
+                              (event.source, self.sealer.tag(event.dedup_key), event.created_at - self._dedup))
         return row["id"] if row else None
 
     def _insert(self, event: Event) -> None:
         self._store.write("INSERT INTO events (id, type, source, principal, priority, title, body, private, dedup_key, "
                           "created_at, expires_at, request_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (event.id, event.type, event.source, event.principal, event.priority, event.title[:200],
-                           event.body[:900], int(event.private), event.dedup_key[:120], event.created_at,
-                           event.expires_at, event.request_id[:40], dumps(event.data)))
+                          (event.id, event.type, event.source, event.principal, event.priority,
+                           self.sealer.seal(event.title[:200], f"events:{event.id}:title"),
+                           self.sealer.seal(event.body[:900], f"events:{event.id}:body"), int(event.private),
+                           self.sealer.tag(event.dedup_key[:120]), event.created_at, event.expires_at,
+                           event.request_id[:40], self.sealer.seal(dumps(event.data), f"events:{event.id}:data")))
+        if self.sealer.mode == WITHHELD:
+            self._held[event.id] = (event.title[:200], event.body[:900], dict(event.data))
 
     def _decision(self, event_id: str, outcome: str, channels, reason: str) -> None:
         self._store.write("INSERT INTO event_decisions (event_id, at, outcome, channels, reason) VALUES (?, ?, ?, ?, ?)",
@@ -339,6 +358,10 @@ class EventHub:
                                                                                                  row["id"]))
                 self._decision(row["id"], MISSED if missed else DENIED, (), reason)
                 continue
+            if self._empty_house(row["source"]):  # parti entre la décision et la remise (heures calmes finies…)
+                self._delivery(row["delivery"], WAITING, row["attempts"], now, "")
+                self._decision(row["id"], AWAITING, (row["channel"],), "maison vide : présenté à votre retour")
+                continue
             send = self._channels.get(row["channel"])
             if send is None:
                 continue  # canal pas encore prêt (démarrage) : la remise attend
@@ -361,12 +384,18 @@ class EventHub:
         self._store.write("UPDATE event_deliveries SET status = ?, attempts = ?, next_at = ?, last_error = ?, "
                           "sent_at = ? WHERE id = ?", (status, attempts, next_at, error, sent_at, delivery_id))
 
-    @staticmethod
-    def _view(row: dict) -> dict:
-        return {"id": row["id"], "type": row["type"], "source": row["source"], "principal": row["principal"],
-                "priority": row["priority"], "title": row["title"], "body": row["body"],
-                "private": bool(row["private"]), "data": loads(row["data"], {}), "created_at": row["created_at"],
-                "expires_at": row["expires_at"]}
+    def _view(self, row: dict) -> dict:
+        eid = row["id"]
+        title = self.sealer.open(row["title"], f"events:{eid}:title")
+        body = self.sealer.open(row["body"], f"events:{eid}:body")
+        data = self.sealer.open(row["data"], f"events:{eid}:data")
+        if title is None:  # retenu (clé absente) : en mémoire tant que le processus vit, sinon indisponible
+            title, body, held = self._held.get(eid, (UNAVAILABLE, "", {}))
+            data = dumps(held)
+        return {"id": eid, "type": row["type"], "source": row["source"], "principal": row["principal"],
+                "priority": row["priority"], "title": title, "body": body or "",
+                "private": bool(row["private"]), "data": loads(data, {}), "created_at": row["created_at"],
+                "expires_at": row["expires_at"], "available": title != UNAVAILABLE}
 
     # --- Notifications manquées ---------------------------------------------------------------------------------
 
@@ -413,6 +442,39 @@ class EventHub:
                               (event_id, VOICE, PENDING, now))
         self.dispatch(event_id=event_id)
         return RELAUNCHED
+
+    def _empty_house(self, source: str) -> bool:
+        """Vrai seulement si la maison est sûrement vide (présence inconnue : on annonce, comme avant)."""
+        if source not in RETURN_SOURCES or self.presence is None:
+            return False
+        try:
+            return self.presence() is False
+        except Exception:  # noqa: BLE001 - présence illisible : inconnue
+            log.exception("Événements : présence illisible")
+            return False
+
+    def on_return(self, *_args) -> int:
+        """Votre retour : ce qui vous attend est présenté, sauf ce qui est devenu obsolète (gardé parmi les
+        notifications manquées, jamais rejoué). Rend le nombre de remises relancées."""
+        now = self._clock()
+        with self._lock:
+            rows = self._store.query("SELECT d.id AS delivery, d.attempts, e.id, e.expires_at FROM event_deliveries d "
+                                     "JOIN events e ON e.id = d.event_id WHERE d.status = ? ORDER BY e.created_at",
+                                     (WAITING,))
+            ready = 0
+            for row in rows:
+                if row["expires_at"] is not None and row["expires_at"] <= now:
+                    self._delivery(row["delivery"], CANCELLED, row["attempts"], now, "obsolète au retour")
+                    self._store.write("UPDATE events SET missed = ? WHERE id = ? AND missed = ''",
+                                      (MISSED_OPEN, row["id"]))
+                    self._decision(row["id"], EXPIRED, (), "obsolète à votre retour : jamais rejoué")
+                    continue
+                self._delivery(row["delivery"], PENDING, row["attempts"], now, "")
+                self._decision(row["id"], ANNOUNCE, (VOICE,), "votre retour")
+                ready += 1
+        if ready:
+            self.dispatch()
+        return ready
 
     def dismiss(self, event_id: str, *, by: str) -> bool:
         if by not in USERS:

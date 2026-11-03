@@ -738,9 +738,10 @@
         el("p", { class: "muted" }, "Activez [platform] dans la configuration du Core (docs/v3/foundation.md)."));
       return;
     }
-    const [ledger, integrity, grants, tasks, confirmations, missed, events] = await Promise.all([api("GET", "/ledger?limit=100"),
+    const [ledger, integrity, grants, tasks, confirmations, missed, events, personal] = await Promise.all([api("GET", "/ledger?limit=100"),
       api("GET", "/ledger/verify"), api("GET", "/grants"), api("GET", "/tasks"), api("GET", "/confirmations"),
-      api("GET", "/events/missed"), api("GET", "/events?limit=40")]);
+      api("GET", "/events/missed"), api("GET", "/events?limit=40"),
+      api("GET", "/personal").catch(() => ({ state: "inconnue", reason: "Core sans lot F4" }))]);
     const eventAction = async (e, verb, done) => {
       await act(api("POST", `/events/${encodeURIComponent(e.id)}/${verb}`), done);
       show("autonomy");
@@ -772,7 +773,11 @@
       el("h1", {}, "Autonomie"),
       cards([["État", AUTONOMY[status.state] || status.state, status.since ? `depuis le ${stamp(status.since)} (${status.changed_by})` : "réglage par défaut"],
         ["Registre d'actions", `${integrity.count} lignes`, integrity.ok ? "chaînage intact" : `ALTÉRÉ à la ligne ${integrity.broken_at} : ${integrity.problem}`],
-        ["Empreinte", integrity.head.slice(0, 16) + "…", "à noter pour comparer plus tard"]]),
+        ["Empreinte", integrity.head.slice(0, 16) + "…", "à noter pour comparer plus tard"],
+        ["Données personnelles", personal.state, personal.state === "ouverte"
+          ? `${personal.records} enregistrement(s), clé ${personal.current} (${personal.fingerprints[personal.current]})`
+            + (personal.to_rotate ? ` ; ${personal.to_rotate} à rechiffrer` : "")
+          : personal.reason || ""]]),
       el("div", { class: "row" },
         button("Activer", () => set("active"), "primary"),
         button("Suspendre", () => set("suspended")),

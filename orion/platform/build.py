@@ -17,7 +17,7 @@ from orion.platform.history import History
 from orion.platform.intelligence import StructuredLLM
 from orion.platform.modules import BaseModule, ModuleRegistry
 from orion.platform.scheduler import Scheduler
-from orion.platform.store import Store
+from orion.platform.store import PUBLIC, Store
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
     if not wanted:
         return None
     m = cfg.modules
-    store = Store(m.database)
+    store = Store(m.database, PUBLIC)  # lot F4 : base publique, aucune donnée personnelle
     permits = foundation.permissions if foundation is not None else None  # moteur central (CORE FOUNDATION)
     scheduler = Scheduler(halted=(lambda: permits.suspended_for("delegated:scheduler")) if permits else None,
                           classify=classify_job if permits else None,

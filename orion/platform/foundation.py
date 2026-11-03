@@ -17,7 +17,7 @@ from orion.platform.autonomy import CONTROL, VOICE, AutonomyError, AutonomyState
 from orion.platform.eventhub import Event, EventHub, InterruptionPolicy
 from orion.platform.ledger import ActionLedger
 from orion.platform.permissions import Capability, Decision, PermissionEngine
-from orion.platform.store import Store
+from orion.platform.store import OPERATIONAL, PERSONAL, Store
 from orion.platform.tasks import TaskService
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,16 @@ class Foundation:
         # Arrêt d'urgence : les tâches en cours reçoivent l'ordre de s'arrêter à leur prochain point de contrôle.
         self.autonomy.on_change(lambda before, after: self.tasks.request_stop_all("arrêt d'urgence")
                                 if after is AutonomyState.EMERGENCY_STOP else None)
+        self.personal = None  # base personnelle chiffrée (lot F4), branchée par attach_personal
+
+    def attach_personal(self, personal, keyring) -> None:
+        """Lot F4 : les textes personnels des bases opérationnelles sont scellés avec la clé de la base personnelle,
+        ou retenus en mémoire si elle est verrouillée ; jamais écrits en clair."""
+        from orion.platform.vault import Sealer
+
+        sealer = Sealer(None if personal.locked else keyring, configured=True)
+        self.personal = personal
+        self.events.sealer = self.tasks.sealer = self.permissions.confirmations.sealer = sealer
 
     def configure(self, quiet_start: str, quiet_end: str, critical_ignores_quiet: bool = False) -> None:
         """Heures calmes de la règle d'interruption (celles des modules, [modules])."""
@@ -183,6 +193,8 @@ class Foundation:
 
     def admin(self, method: str, route: list[str], query: dict, data: Any, session: str) -> tuple[int, Any]:
         """``session`` : client authentifié par l'API (IP autorisée et jeton vérifiés avant d'arriver ici)."""
+        if route and route[0] == "personal":
+            return self._personal_admin(method, route[1:])
         if route == ["autonomy"] and method == "GET":
             return 200, self.autonomy.snapshot()
         if route == ["autonomy"] and method == "POST":
@@ -242,12 +254,40 @@ class Foundation:
             return (200, {"status": "ok"}) if ok else (409, {"status": "error", "error": "not_applicable"})
         return 404, {"status": "error", "error": "not_found"}
 
+    def _personal_admin(self, method: str, route: list[str]) -> tuple[int, Any]:
+        """État de la base personnelle (jamais de contenu ni de clé), rotation progressive, vérification."""
+        from orion.platform.vault import VaultError
+
+        if self.personal is None:
+            return 200, {"state": "non configurée", "reason": "[platform] personal = false"}
+        try:
+            if route == [] and method == "GET":
+                return 200, self.personal.status()
+            if route == ["rotate"] and method == "POST":
+                done = self.personal.rotate()
+                self.ledger.append(CONTROL, "PERSONAL", "personal.rotate", "allow", f"{done} rechiffré(s)")
+                return 200, {"rotated": done, **self.personal.status()}
+            if route == ["verify"] and method == "POST":
+                return 200, self.personal.verify()
+        except VaultError as exc:
+            return 409, {"status": "error", "error": str(exc)}
+        return 404, {"status": "error", "error": "not_found"}
+
 
 def build_foundation(cfg) -> Foundation | None:
     p = getattr(cfg, "platform", None)
     if p is None or not p.enabled:
         return None
-    foundation = Foundation(Store(Path(p.database)))
+    foundation = Foundation(Store(Path(p.database), OPERATIONAL))
+    if p.personal:
+        from orion.platform.personal import PersonalStore
+        from orion.platform.vault import load_keyring
+
+        keyring, reason = load_keyring(p.data_key)
+        personal = PersonalStore(Store(Path(p.personal_database), PERSONAL), keyring, reason)
+        foundation.attach_personal(personal, keyring)
+        state = personal.status()
+        log.info("Données personnelles : base %s (%s)", state["state"], state["reason"] or f"clé {state['current']}")
     log.info("CORE FOUNDATION : autonomie %s, registre %d lignes", foundation.autonomy.snapshot()["label"],
              foundation.ledger.head()["count"])
     return foundation

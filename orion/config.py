@@ -409,6 +409,10 @@ class PlatformConfig:
     Désactivé : comportement V2 inchangé."""
     enabled: bool = False
     database: Path = Path("data/orion_ops.db")
+    # Lot F4 : base personnelle chiffrée ; clé reçue de systemd (identifiant data_key), jamais d'un fichier du dépôt.
+    personal: bool = False
+    personal_database: Path = Path("data/orion_personal.db")
+    data_key: str = "orion.data_key"
 
 
 @dataclass(frozen=True)

@@ -58,6 +58,7 @@ from orion.platform.autonomy import CONTROL, VOICE
 from orion.platform.permissions import Capability, Decision, PermissionDenied, PermissionEngine
 from orion.platform.running import running_as
 from orion.platform.store import Migration, Store, dumps, loads
+from orion.platform.vault import WITHHELD, Sealer, is_sealed
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ class TaskType:
     timeout: float = 300.0  # durée du bail : au-delà, la tâche est considérée interrompue
     user: bool = True  # programmable par vous
     module: bool = False  # programmable par le module propriétaire
+    personal: bool = False  # paramètres et résultat personnels : scellés (lot F4), refusés sans la clé
 
     @property
     def owner(self) -> str:
@@ -273,6 +275,7 @@ class TaskService:
     def __init__(self, store: Store, permissions: PermissionEngine, clock: Callable[[], float] = time.time,
                  instance: str | None = None, max_backoff: float = MAX_BACKOFF, batch: int = 20):
         self._store, self._permissions, self._clock = store, permissions, clock
+        self.sealer = Sealer()  # lot F4 : branché par la fondation quand la base personnelle est configurée
         self._ledger = permissions.ledger
         self.instance = instance or secrets.token_hex(6)  # propriétaire des bails de ce processus
         self._types: dict[str, TaskType] = {}
@@ -286,13 +289,14 @@ class TaskService:
     # --- Types de tâche (code de la plateforme, jamais des données) ------------------------------------------
 
     def register(self, kind: str, handler: Callable[[TaskRun], Any], capability: Capability | str, *,
-                 idempotent: bool = False, timeout: float = 300.0, user: bool = True, module: bool = False) -> None:
+                 idempotent: bool = False, timeout: float = 300.0, user: bool = True, module: bool = False,
+                 personal: bool = False) -> None:
         if not KIND.match(kind or ""):
             raise TaskError(f"type de tâche invalide : {kind!r} (« module.action » attendu)")
         if kind in self._types:
             raise TaskError(f"type de tâche déjà enregistré : {kind}")
         self._types[kind] = TaskType(kind, handler, Capability(capability), idempotent, max(1.0, float(timeout)),
-                                     user, module)
+                                     user, module, personal)
 
     def types(self) -> list[str]:
         return sorted(self._types)
@@ -334,6 +338,8 @@ class TaskService:
                 grant_id: str, key: str | None) -> Task:
         params = dict(params or {})
         dumps(params)  # paramètres sérialisables, sinon erreur ici plutôt qu'à l'exécution
+        if task_type.personal and self.sealer.mode == WITHHELD:
+            raise TaskError("tâche personnelle impossible : données personnelles verrouillées (clé absente)")
         now = self._clock()
         run_at = now if run_at is None else float(run_at)
         if interval is not None and float(interval) <= 0:
@@ -348,12 +354,13 @@ class TaskService:
             if key:
                 existing = self._store.one("SELECT * FROM tasks WHERE dedup_key = ?", (key,))
                 if existing is not None:  # même demande répétée (double clic, nouvel essai réseau) : une seule tâche
-                    return Task.from_row(existing)
+                    return self._task(existing)
             self._store.write(
                 "INSERT INTO tasks (id, kind, principal, origin, capability, params, state, run_at, interval, "
                 "expires_at, max_attempts, grant_id, dedup_key, created_by, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (task_id, task_type.kind, principal, origin, task_type.capability.value, dumps(params), PENDING,
+                (task_id, task_type.kind, principal, origin, task_type.capability.value,
+                 self._pack(task_type.kind, task_id, "params", params), PENDING,
                  run_at, float(interval) if interval else None, float(expires_at) if expires_at else None,
                  max(1, int(max_attempts)), grant_id, key or None, by, now, now))
             self._ledger.append(by, "TASK", f"task.create:{task_id}", "allow",
@@ -377,10 +384,29 @@ class TaskService:
             if self._halted():  # arrêt d'urgence pendant la file : le reste attend
                 log.warning("Tâches : arrêt d'urgence, file interrompue")
                 break
-            outcome = self._run(Task.from_row(row), now)
+            if self._locked_out(row["kind"]):  # tâche personnelle sans la clé : elle attend la clé, intacte
+                continue
+            outcome = self._run(self._task(row), now)
             if outcome:
                 outcomes.append((row["id"], outcome))
         return outcomes
+
+    def _pack(self, kind: str, task_id: str, field: str, value: Any) -> str:
+        task_type = self._types.get(kind)
+        text = dumps(value)
+        return self.sealer.seal(text, f"tasks:{task_id}:{field}") if task_type and task_type.personal else text
+
+    def _task(self, row: dict) -> Task:
+        row = dict(row)
+        for name in ("params", "result"):
+            if is_sealed(row[name]):
+                text = self.sealer.open(row[name], f"tasks:{row['id']}:{name}")
+                row[name] = "{}" if text is None else text
+        return Task.from_row(row)
+
+    def _locked_out(self, kind: str) -> bool:
+        task_type = self._types.get(kind)
+        return bool(task_type and task_type.personal and self.sealer.mode == WITHHELD)
 
     def _halted(self) -> bool:
         """Arrêt d'urgence ou état illisible : vrai (une tâche programmée elle-même ne passe plus)."""
@@ -453,7 +479,7 @@ class TaskService:
         self._end_run(run_id, "terminée malgré l'annulation", why)
         state = CANCELLED if task.interval else DONE  # périodique : aucune occurrence suivante
         self._update(task.id, state=state, lease_owner="", lease_until=None, confirmation="", last_error=why,
-                     runs=task.runs + 1, result=dumps(short), guard=ACTIVE)
+                     runs=task.runs + 1, result=self._pack(task.kind, task.id, "result", short), guard=ACTIVE)
         self._ledger.append(task.principal, "TASK", f"task.cancel_late:{task.id}", "deny", why)
         return state
 
@@ -529,7 +555,8 @@ class TaskService:
             if task.expires_at is not None and next_at >= task.expires_at:
                 return self._finish(task, run_id, DONE, "", result=short, run_done=True)
             if not self._update(task.id, state=PENDING, run_at=next_at, attempts=0, runs=task.runs + 1,
-                                lease_owner="", lease_until=None, last_error="", result=dumps(short),
+                                lease_owner="", lease_until=None, last_error="",
+                                result=self._pack(task.kind, task.id, "result", short),
                                 confirmation="", guard=RUNNING):
                 return self.get(task.id).state  # annulée pendant l'exécution
             self._ledger.append(task.principal, "TASK", f"task.result:{task.id}", "allow", "réussie ; suivante prévue",
@@ -553,7 +580,8 @@ class TaskService:
                 run_done: bool = False) -> str:
         self._end_run(run_id, {DONE: "réussie", FAILED: "échec"}.get(state, state), error)
         if not self._update(task.id, state=state, lease_owner="", lease_until=None, last_error=error,
-                            confirmation="", runs=task.runs + (1 if run_done else 0), result=dumps(result or {}),
+                            confirmation="", runs=task.runs + (1 if run_done else 0),
+                            result=self._pack(task.kind, task.id, "result", result or {}),
                             guard=RUNNING):
             self._ledger.append(task.principal, "TASK", f"task.result:{task.id}", "deny",
                                 "résultat ignoré : tâche annulée ou reprise entre-temps")
@@ -592,7 +620,7 @@ class TaskService:
         found = []
         for row in self._store.query("SELECT * FROM tasks WHERE state IN (?, ?) AND (lease_until IS NULL OR "
                                      "lease_until < ?)", (*ACTIVE, now)):
-            task = Task.from_row(row)
+            task = self._task(row)
             if task.id in self._active:
                 continue  # exécutée ici même : jamais reprise pendant qu'elle tourne
             task_type = self._types.get(task.kind)
@@ -689,7 +717,7 @@ class TaskService:
 
     def get(self, task_id: str) -> Task | None:
         row = self._store.one("SELECT * FROM tasks WHERE id = ?", (task_id,))
-        return Task.from_row(row) if row else None
+        return self._task(row) if row else None
 
     def list(self, states: tuple[str, ...] | None = None, limit: int = 200) -> list[Task]:
         sql, params = "SELECT * FROM tasks", []
@@ -697,7 +725,7 @@ class TaskService:
             sql += f" WHERE state IN ({', '.join('?' for _ in states)})"
             params += list(states)
         rows = self._store.query(sql + " ORDER BY run_at LIMIT ?", (*params, max(1, min(int(limit), 1000))))
-        return [Task.from_row(row) for row in rows]
+        return [self._task(row) for row in rows]
 
     def runs(self, task_id: str) -> list[dict]:
         return self._store.query("SELECT * FROM task_runs WHERE task_id = ? ORDER BY id", (task_id,))

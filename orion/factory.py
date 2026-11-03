@@ -1049,6 +1049,15 @@ def build_agent(
         notifications.permit = foundation.permissions.decide
         foundation.configure(cfg.modules.quiet_start, cfg.modules.quiet_end, cfg.modules.critical_ignores_quiet)
         notifications.attach_hub(foundation.events)  # F3 : événement, décision et remise séparés et persistants
+        if presence is not None:  # rappels et rendez-vous gardés dans une maison vide, présentés au retour
+            from orion.presence.engine import ARRIVAL_CONFIRMED
+
+            def house_occupied() -> bool | None:
+                house = presence.engine.snapshot()["house"]
+                return None if house == "unknown" else house == "occupied"
+
+            foundation.events.presence = house_occupied
+            events.subscribe(ARRIVAL_CONFIRMED, foundation.events.on_return)
         if voice is not None:
             voice.still_allowed = lambda n: foundation.permissions.blocked(n.metadata["principal"], "NOTIFY")
     speaker["core"] = tools

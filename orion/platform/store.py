@@ -25,6 +25,18 @@ log = logging.getLogger(__name__)
 
 MODULE_NAME = r"^[a-z][a-z0-9_]{0,30}$"
 
+# Lot F4 : trois bases, chacune n'accueille que sa classe de données. Opérationnelle (orion_ops.db) : fonctionnement
+# d'ORION, textes personnels scellés (orion.platform.vault.Sealer). Publique (orion_v3.db) : sources publiques et état
+# des modules. Personnelle (orion_personal.db) : chiffrée enregistrement par enregistrement.
+OPERATIONAL, PUBLIC, PERSONAL = "operational", "public", "personal"
+DATA_CLASSES = {
+    "ledger": OPERATIONAL, "autonomy": OPERATIONAL, "grants": OPERATIONAL, "confirmations": OPERATIONAL,
+    "tasks": OPERATIONAL, "events": OPERATIONAL,
+    "history": PUBLIC, "alerts": PUBLIC, "news": PUBLIC, "price_history": PUBLIC, "event_calendar": PUBLIC,
+    "watch": PUBLIC, "evolve": PUBLIC, "purchase": PUBLIC,
+    "personal": PERSONAL,
+}
+
 
 class StoreError(RuntimeError):
     pass
@@ -50,8 +62,9 @@ def loads(text: str | None, default: Any = None) -> Any:
 
 
 class Store:
-    def __init__(self, path: Path | str = ":memory:"):
+    def __init__(self, path: Path | str = ":memory:", data_class: str | None = None):
         self.path = str(path)
+        self.data_class = data_class  # None : aucune vérification (tests, outils)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -76,6 +89,9 @@ class Store:
 
         if not re.match(MODULE_NAME, module):
             raise StoreError(f"Nom de module invalide : {module!r}")
+        if self.data_class is not None and DATA_CLASSES.get(module) != self.data_class:
+            raise StoreError(f"{module} : classe de données {DATA_CLASSES.get(module, 'inconnue')}, refusée dans la base "
+                             f"{self.data_class}")
         versions = [m.version for m in migrations]
         if versions != list(range(1, len(versions) + 1)):
             raise StoreError(f"{module} : migrations attendues 1, 2, 3… sans trou (reçu {versions})")

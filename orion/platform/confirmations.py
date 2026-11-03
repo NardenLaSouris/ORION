@@ -24,6 +24,7 @@ from typing import Any, Callable
 from orion.platform.autonomy import CONTROL, VOICE
 from orion.platform.ledger import ActionLedger
 from orion.platform.store import Migration, Store, dumps
+from orion.platform.vault import UNAVAILABLE, Sealer
 
 MIGRATIONS = (
     Migration(1, """
@@ -83,6 +84,7 @@ class Confirmation:
 class ConfirmationStore:
     def __init__(self, store: Store, ledger: ActionLedger, clock: Callable[[], float] = time.time):
         self._store, self._ledger, self._clock = store, ledger, clock
+        self.sealer = Sealer()  # lot F4 : le résumé décrit votre demande (montant, destinataire) : scellé
         store.migrate("confirmations", MIGRATIONS)
 
     def request(self, principal: str, action: str, params: Any = None, *, ttl: float = DEFAULT_TTL,
@@ -94,7 +96,8 @@ class ConfirmationStore:
         self._store.write("INSERT INTO confirmations (id, principal, action, params_hash, summary, created_at, "
                           "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                           (confirmation.id, confirmation.principal, confirmation.action, confirmation.params_hash,
-                           confirmation.summary, now, confirmation.expires_at))
+                           self.sealer.seal(confirmation.summary, f"confirmations:{confirmation.id}:summary"), now,
+                           confirmation.expires_at))
         self._ledger.append(principal, "CONFIRMATION", f"confirm.request:{confirmation.id}", "ask",
                             f"confirmation demandée pour {action}"[:200], detail={"échéance": confirmation.expires_at})
         return confirmation
@@ -138,10 +141,14 @@ class ConfirmationStore:
 
     def get(self, confirmation_id: str) -> Confirmation | None:
         row = self._store.one("SELECT * FROM confirmations WHERE id = ?", (confirmation_id,))
-        return Confirmation(**row) if row else None
+        return self._load(row) if row else None
 
     def pending(self) -> list[dict]:
         now = self._clock()
         rows = self._store.query("SELECT * FROM confirmations WHERE used_at IS NULL AND revoked_at IS NULL AND "
                                  "expires_at > ? ORDER BY created_at", (now,))
-        return [Confirmation(**row).as_dict(now) for row in rows]
+        return [self._load(row).as_dict(now) for row in rows]
+
+    def _load(self, row: dict) -> Confirmation:
+        summary = self.sealer.open(row["summary"], f"confirmations:{row['id']}:summary")
+        return Confirmation(**{**row, "summary": UNAVAILABLE if summary is None else summary})

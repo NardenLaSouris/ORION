@@ -1,4 +1,4 @@
-# CORE FOUNDATION — lots F1 et F2 : permissions centrales, autonomie, registre d'actions, tâches persistantes
+# CORE FOUNDATION — lots F1 à F4 : permissions, autonomie, registre, tâches, événements, stockage chiffré
 
 F1 et F2 livrés sur `v3` le 2 novembre 2026, jamais déployés (F2 : § « Lot F2 » plus bas). Inactif par défaut (`[platform] enabled = false`) : la V2 et les
 modules v3 se comportent alors exactement comme avant.
@@ -447,3 +447,165 @@ règle (`InterruptionPolicy.route`) et inscrit chaque alerte et sa décision au 
 4. **Planificateur des modules :** ses tâches périodiques ne passent pas encore par `TaskService` (pas de
    `cancel_pending` pour elles). L'arrêt d'urgence les retient avant chaque tâche, comme en F1.
 5. **Échéances par défaut :** celles des notifications sont fixées par source, et non réglables dans ORION Control.
+
+# Lot F4 : stockage séparé et chiffrement des données personnelles
+
+## Trois bases, trois classes de données
+
+| Base | Classe | Contenu | Chiffrement |
+|---|---|---|---|
+| `orion_ops.db` | opérationnelle | registre, autonomie, autorisations, confirmations, tâches, événements | textes personnels **scellés** |
+| `orion_v3.db` | publique | actualités, surveillances, prix, calendrier d'événements publics, EVOLVE, achats (bac à sable), alertes | aucun |
+| `orion_personal.db` | personnelle | faits, futurs imports (KNOWLEDGE, Takeout) | chaque enregistrement chiffré |
+
+- `Store(path, data_class)` refuse une table d'une autre classe (`DATA_CLASSES`, `orion/platform/store.py`) : une
+  table personnelle ne peut pas atterrir par erreur dans la base opérationnelle ou publique.
+- **Textes personnels de la base opérationnelle** (`Sealer`, `orion/platform/vault.py`) : titre, texte et données
+  d'un événement (rappel, expéditeur d'un mail), résumé d'une confirmation, paramètres et résultat d'une tâche
+  déclarée `personal=True`. Trois modes :
+  - `clair` : base personnelle non configurée (`[platform] personal = false`) : comportement de F3 ;
+  - `scellé` : chiffrés avec la clé des données personnelles, liés à leur place ; les clés de dédoublonnage
+    deviennent des étiquettes HMAC (égalité vérifiable, texte jamais gardé) ;
+  - `retenu` : base personnelle configurée mais clé absente : le texte n'est **jamais** écrit. Il reste en mémoire
+    jusqu'au redémarrage, puis s'affiche « contenu indisponible ». Une tâche personnelle est refusée à la création,
+    et une tâche personnelle déjà programmée attend la clé sans s'exécuter.
+
+## Chiffrement
+
+- AES-256-GCM (bibliothèque `cryptography`, déjà utilisée par la passerelle d'appel), nonce aléatoire de 96 bits.
+- Données associées : `personal:<collection>:<identifiant>` ou `events:<id>:title`… Un chiffré recopié à une autre
+  place, ou modifié d'un seul bit, est refusé.
+- Chaque chiffré commence par l'identifiant de sa clé (rotation). Sous-clés dérivées par HKDF-SHA-256 : chiffrement,
+  étiquettes, empreinte. L'empreinte (8 octets) identifie une clé dans ORION Control sans la révéler.
+- En clair dans la base personnelle : collection, identifiant (opaque), identifiant de clé, dates. Jamais le contenu.
+- Un témoin chiffré par clé détecte une clé fausse dès l'ouverture : la base reste alors verrouillée, sans jamais
+  produire de faux déchiffrement.
+
+## Gestion de la clé
+
+- **Format** : trousseau JSON `{"current": "k20261103", "keys": {"k20261103": "<32 octets en base64>"}}`.
+- **En service** : la clé arrive par les identifiants de systemd, jamais par `.env`, l'environnement, Git ou les
+  journaux. Pour l'environnement V3, l'unité contient `ImportCredential=orion-v3.data_key`. Le trousseau se range,
+  chiffré par la machine, dans `/etc/credstore.encrypted/orion-v3.data_key` :
+
+  ```bash
+  sudo systemd-creds encrypt --name=orion-v3.data_key <trousseau> /etc/credstore.encrypted/orion-v3.data_key
+  ```
+
+  - systemd le déchiffre au démarrage, avec la clé de la machine, dans un dossier en mémoire que seul le service lit.
+  - Le compte `orion-v3` ne lit jamais ce fichier ni la clé de la machine.
+  - La production aura son propre identifiant (`orion.data_key`) : les deux environnements ne partagent jamais de clé.
+- **Aucune clé réelle n'a été créée.** Sans identifiant, la base est verrouillée et ORION fonctionne normalement.
+  Créer la vraie clé reste votre décision, et se fait avec `generate`.
+- **Copie hors ligne obligatoire** : le trousseau lui-même (44 caractères par clé), sur papier ou dans un gestionnaire
+  de mots de passe. C'est la seule protection contre la perte de la machine.
+
+## Outil d'administration (`python -m orion.platform.datakey`)
+
+| Commande | Effet |
+|---|---|
+| `generate <trousseau>` | nouveau trousseau (fichier 600, jamais écrasé) ; affiche identifiant et empreinte |
+| `show <trousseau>` | identifiants et empreintes, jamais les clés |
+| `rotate <trousseau>` | ajoute une clé et la rend courante ; les anciennes restent pour lire |
+| `rewrap <trousseau> <base>` | rechiffre tout avec la clé courante (service arrêté) |
+| `retire <trousseau> <id> <base>` | retire une ancienne clé, refusé tant qu'un enregistrement en dépend |
+| `verify <trousseau> <base>` | déchiffre tout, compte les erreurs (identifiants seulement) |
+| `backup <trousseau> <base> <dossier>` | sauvegarde chiffrée et manifeste ; refusée dans un dossier qui contient une clé |
+| `restore <trousseau> <manifeste> <base>` | restauration vérifiée ; la base en place est gardée à côté |
+
+## Rotation de la clé
+
+1. `rotate` : nouvelle clé courante. Les nouveaux enregistrements l'utilisent aussitôt, les anciens restent lisibles.
+2. Le trousseau mis à jour remplace l'identifiant systemd, puis le service redémarre.
+3. `rewrap`, service arrêté. La route `POST /api/personal/rotate` le fait aussi par lots de 500, service en marche.
+4. `retire` de l'ancienne clé : refusé tant qu'un enregistrement en dépend.
+5. Nouvelle copie hors ligne du trousseau. L'ancienne copie peut être détruite après une restauration d'essai.
+
+Après une rotation, une sauvegarde faite avant reste lisible avec l'ancien trousseau, d'où l'intérêt de le garder
+tant que cette sauvegarde existe.
+
+## Sauvegarde (compatible NAS, sans dépendre d'un modèle)
+
+- `backup` copie la base à chaud (API de sauvegarde de SQLite) dans un **dossier quelconque** : NAS monté en SMB ou
+  NFS, disque externe, clé USB. Elle écrit à côté un manifeste : empreinte SHA-256, nombre d'enregistrements, clés
+  utilisées, date. Le fichier ne contient que des chiffrés, et le NAS ne voit jamais rien en clair.
+- **La clé n'est jamais à côté** : refus si le dossier contient un trousseau ou est le dossier des identifiants. La
+  clé de la machine qui protège l'identifiant systemd reste sur le mini-PC ; la copie hors ligne est ailleurs.
+
+## Restauration
+
+1. Service arrêté.
+2. `restore <trousseau> <manifeste> <base>`. L'outil vérifie l'empreinte SHA-256, copie la sauvegarde dans un
+   fichier provisoire et déchiffre chaque enregistrement. Le nombre doit correspondre au manifeste.
+3. Seulement ensuite il installe la base. Une base déjà en place est renommée `….avant-restauration-<date>`, jamais
+   écrasée.
+4. Mauvaise clé, sauvegarde altérée ou enregistrement illisible : refus, et rien n'est installé.
+
+## Perte de la clé : conséquences
+
+- **Sans le trousseau, ni la base personnelle ni ses sauvegardes ne peuvent être lues, par personne, y compris
+  ORION.** Il n'existe aucune porte dérobée ni clé de secours.
+- Ce qui reste : la base opérationnelle, la base publique et toute la V2. ORION démarre et converse. Les données
+  personnelles sont « verrouillées », et les textes des événements scellés deviennent « contenu indisponible ».
+- Perte de la machine seule : copie hors ligne remise en identifiant systemd, puis sauvegarde restaurée.
+- Perte de la machine **et** de la copie hors ligne : données personnelles perdues. Il faut repartir d'une base vide,
+  puis réimporter depuis les sources d'origine, Takeout par exemple, si elles existent encore.
+
+## Migration progressive et réversible
+
+- `PersonalStore.import_json(collection, fichier, identifiant)` importe une liste JSON, par exemple `memory.json`.
+  - Elle ne modifie jamais la source.
+  - Tout se fait dans une seule transaction, avec trace de l'empreinte de la source.
+  - Elle est idempotente : un même élément garde le même identifiant, donc deux passages donnent le même résultat.
+- `export_json` est l'export inverse. Il produit le fichier d'origine **octet pour octet** : ordre des éléments,
+  ordre des clés, mise en forme d'ORION. Testé sur une mémoire factice produite par `MemoryStore`.
+- Rien n'est migré aujourd'hui. `memory.json` reste celui de la V2, et la bascule de la mémoire vers la base
+  personnelle se fera avec KNOWLEDGE, dans l'ordre suivant :
+  1. import ;
+  2. double lecture et comparaison ;
+  3. bascule ;
+  4. JSON régénéré par l'export tant que le retour arrière reste possible.
+
+## Test complet demandé
+
+`test_full_cycle_encrypt_stop_restart_recover_key_and_decrypt`, avec un vrai processus Core par étape, une clé
+factice remise comme par systemd (`CREDENTIALS_DIRECTORY`) et des données factices :
+
+1. démarrage, écriture d'un fait personnel et d'un événement : chiffrés, puis arrêt ;
+2. aucun octet du texte en clair dans les fichiers de données (base et journal WAL) ;
+3. redémarrage : déchiffrement ;
+4. clé perdue : base verrouillée, événement « contenu indisponible », aucun contenu ;
+5. autre clé : verrouillée, aucun faux déchiffrement ;
+6. récupération, en remettant la copie hors ligne : tout est de nouveau lisible.
+
+Avec systemd réel : une fois l'environnement V3 installé, le même cycle peut être rejoué avec une clé **factice**
+rangée par `systemd-creds` (demande `sudo`), puis la clé factice est retirée. Rien n'a été fait sans votre accord.
+
+## Rappels dans une maison vide (décision du 3 novembre 2026)
+
+- Un rappel ou un rendez-vous (`RETURN_SOURCES`) qui survient quand la présence dit la maison **sûrement vide** n'est
+  pas prononcé. Il reçoit la décision `awaiting_return`, et sa remise attend votre retour.
+- Même chose s'il était différé par les heures calmes et que vous êtes parti entre-temps.
+- **Au retour** (`ARRIVAL_CONFIRMED` de la présence) :
+  - ce qui est encore valable est dit, une fois ;
+  - ce qui est devenu obsolète (échéance dépassée : 6 h pour un rappel, 2 h pour un rendez-vous) n'est jamais
+    rejoué. Il reste consultable parmi les notifications manquées, marqué « obsolète ».
+- Présence inconnue (capteurs absents ou illisibles) : annoncé comme avant. On ne se tait que si la maison est sûrement
+  vide.
+- Les mails gardent leur propre règle (la V2 exige déjà la présence), comme les minuteurs et les routines.
+
+## Écarts et risques résiduels (F4)
+
+1. **Surveillances et achats en base publique** : les sujets surveillés et les mandats d'achat (bac à sable) disent
+   quelque chose de vos goûts. Ils restent dans `orion_v3.db` pour l'instant ; ils passeront dans la base
+   personnelle avec KNOWLEDGE.
+2. **Messages d'erreur des tâches** (`last_error`) : non scellés. Une tâche personnelle qui échoue avec un message
+   contenant votre texte le garderait en clair. Les types personnels doivent lever des erreurs sans contenu.
+3. **Empreinte des paramètres d'une confirmation** : SHA-256 sans clé. Des paramètres très courts (un montant)
+   pourraient être retrouvés par essais. Le résumé, lui, est scellé.
+4. **Pas de chiffrement du fichier entier** : SQLCipher n'est pas disponible. Collections, dates et nombre
+   d'enregistrements restent visibles dans la base personnelle, mais jamais leur contenu.
+5. **Clé en mémoire du service** : un code qui tourne sous le compte du service peut la lire pendant qu'il tourne.
+   F5 prévoit les comptes séparés (`orion-import`, `orion-evolve`), qui n'y auront pas accès.
+6. **Rotation et dédoublonnage** : après une rotation, un événement identique à un autre publié juste avant n'est
+   plus reconnu comme doublon (étiquette d'une autre clé). La fenêtre est de 12 heures.

@@ -548,6 +548,8 @@ output_device = "Chat (2- TC-HELICON GoXLR), MME"
 # Micro et sortie d'un autre PC via son agent ORION (python -m orion.winagent), par exemple
 # "http://192.168.1.128:8765" : remplace input_device et output_device. Jeton : ORION_AGENT_TOKEN dans .env.
 remote = ""
+# "none" : ni micro ni haut-parleur (environnement de test V3 : conversation écrite par /discuter du fond d'écran).
+mode = "devices"
 # Délai max (s) pour commencer à parler après "Oui, monsieur ?".
 listen_timeout = 6.0
 # Silence (s) marquant la fin d'une phrase.

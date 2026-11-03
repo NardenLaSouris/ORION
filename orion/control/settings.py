@@ -1,6 +1,10 @@
 """Paramètres d'ORION Control (%APPDATA%\\ORION Control) ; le jeton est rangé à part et jamais renvoyé à l'interface.
 
 Sans jeton enregistré, celui du dépôt est utilisé (ORION_AGENT_TOKEN dans .env, le même que pour l'agent).
+
+Profil « v3 » (``--profile v3``) : environnement de développement V3 du mini-PC (docs/v3/environnements.md). Réglages et
+jeton dans %APPDATA%/ORION Control V3, Core sur le port 8866, et **jamais** de repli sur le jeton du dépôt (celui de
+la production).
 """
 
 from __future__ import annotations
@@ -21,8 +25,14 @@ REPO_ENV = Path(__file__).resolve().parents[2] / ".env"
 THEMES = ("auto", "visage", "jarvis", "nuit", "rouge", "system", "dark", "light")
 
 
-def app_dir() -> Path:
+PROFILES = {"": ("ORION Control", "http://192.168.1.91:8766"),
+            "v3": ("ORION Control V3", "http://192.168.1.91:8866")}  # profil -> (nom, Core par défaut)
+
+
+def app_dir(profile: str = "") -> Path:
     base = Path(os.environ.get("APPDATA") or Path.home())
+    if profile:
+        return base / PROFILES[profile][0]
     folder, legacy = base / "ORION Control", base / "JARVIS Control"
     if not folder.exists() and legacy.is_dir():  # réglages et journal de JARVIS Control repris tels quels
         try:
@@ -58,9 +68,10 @@ class Settings:
 
 
 class SettingsStore:
-    def __init__(self, folder: Path | None = None, env_file: Path = REPO_ENV):
+    def __init__(self, folder: Path | None = None, env_file: Path | None = REPO_ENV, core_url: str = ""):
         self.folder = Path(folder) if folder else app_dir()
-        self._env_file = env_file
+        self._env_file = env_file  # None : aucun repli sur le jeton du dépôt (profil v3)
+        self._default = Settings(core_url=core_url) if core_url else Settings()
 
     @property
     def _settings_file(self) -> Path:
@@ -76,10 +87,10 @@ class SettingsStore:
             known = {f.name for f in fields(Settings)}
             return Settings(**{k: v for k, v in data.items() if k in known}).validated()
         except FileNotFoundError:
-            return Settings()
+            return self._default
         except (OSError, ValueError, TypeError) as exc:
             log.warning("Paramètres illisibles, valeurs par défaut utilisées : %s", exc)
-            return Settings()
+            return self._default
 
     def save(self, settings: Settings) -> Settings:
         settings = settings.validated()
@@ -92,7 +103,9 @@ class SettingsStore:
             saved = self._token_file.read_text(encoding="utf-8-sig").strip()
         except OSError:
             saved = ""
-        return saved or secret("ORION_AGENT_TOKEN", self._env_file)
+        if saved or self._env_file is None:
+            return saved
+        return secret("ORION_AGENT_TOKEN", self._env_file)
 
     def set_token(self, token: str) -> None:
         token = token.strip()

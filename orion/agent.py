@@ -474,6 +474,8 @@ class Agent:
                 self._wake_word.reset()
                 trigger.reset()
                 continue
+            if getattr(self._source, "silent", False):  # [audio] mode = "none" : aucun mot de réveil à chercher
+                continue
             score = self._wake_word.process(frame)
             sure_run = self._sure_run(sure_run, score)
             if trigger.update(score):

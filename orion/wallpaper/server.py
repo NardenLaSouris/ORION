@@ -8,7 +8,8 @@ Interactions (POST) :
 - ``/action`` : commandes rapides, liste fermée d'outils sans risque (lumières, lecture Spotify, suppression d'un
   rappel désigné par son numéro), exécutées par le Core des outils (permissions, journal) au nom du propriétaire ;
   rien d'autre n'est accepté ;
-- ``/say`` : demande écrite à ORION, traitée par sa boucle comme vos messages Linphone (jarvis.wallpaper.inbox).
+- ``/say`` : demande écrite à ORION, traitée par sa boucle comme vos messages Linphone (jarvis.wallpaper.inbox) ;
+  la page ``/discuter`` en est le champ de saisie (le fond d'écran, lui, n'en a pas).
 Chaque POST exige le jeton de la page (``X-Orion-Token``, lu par /config, illisible depuis un autre site) et une
 origine identique à la page : un site ouvert sur le PC ne peut pas agir à votre place.
 """
@@ -38,6 +39,7 @@ FILES = {
     "/wallpaper.css": (STATIC_DIR / "wallpaper.css", "text/css; charset=utf-8"),
     "/wallpaper.js": (STATIC_DIR / "wallpaper.js", "text/javascript; charset=utf-8"),
     "/michroma.woff2": (FACE_STATIC / "michroma.woff2", "font/woff2"),  # police du visage (SIL OFL)
+    "/discuter": (STATIC_DIR / "discuter.html", "text/html; charset=utf-8"),  # conversation écrite ([wallpaper] chat)
 }
 # Commandes rapides permises : réversibles, sans confirmation, sans effet hors de la maison.
 ACTIONS = {"light_on", "light_off", "light_toggle", "set_brightness", "spotify_play", "spotify_pause",

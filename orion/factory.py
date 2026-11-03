@@ -768,8 +768,12 @@ def prime_llm(llm: LanguageModel, router: IntentRouter, registry=None) -> thread
 
 
 def build_source(cfg: Config) -> AudioSource:
-    """Micro local, ou celui d'un autre PC via son agent quand [audio] remote est renseigné."""
+    """Micro local, ou celui d'un autre PC via son agent quand [audio] remote est renseigné ; aucun en mode "none"."""
     a = cfg.audio
+    if _no_audio(cfg):
+        from orion.audio.silent import SilentSource
+
+        return SilentSource(a.sample_rate, a.frame_samples)
     if a.remote:
         from orion.audio.network import NetworkSource
 
@@ -779,7 +783,17 @@ def build_source(cfg: Config) -> AudioSource:
     return MicrophoneSource(a.sample_rate, a.frame_samples, a.input_device)
 
 
+def _no_audio(cfg: Config) -> bool:
+    if cfg.audio.mode not in ("devices", "none"):
+        raise ValueError(f'[audio] mode : "devices" ou "none" attendu, pas {cfg.audio.mode!r}')
+    return cfg.audio.mode == "none"
+
+
 def build_sink(cfg: Config) -> AudioSink:
+    if _no_audio(cfg):
+        from orion.audio.silent import NullSink
+
+        return NullSink()
     if cfg.audio.remote:
         from orion.audio.network import NetworkSink
 

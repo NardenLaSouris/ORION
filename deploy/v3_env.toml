@@ -1,0 +1,107 @@
+# ORION V3 : environnement de développement isolé du mini-PC (/opt/orion-v3, service orion-v3).
+# Modèle installé par deploy/v3_env.sh ; voir docs/v3/environnements.md.
+# Aucun secret de production, aucune donnée personnelle réelle : pas de mail, d'appel, de présence, de lumières,
+# de Spotify ni d'agent de PC. Les adresses __PC__ et __KATANA__ sont remplacées à l'installation.
+
+[llm]
+# Modèles partagés, en lecture seule (aucune donnée personnelle) : worker du Katana, secours local.
+host = "http://192.168.1.73:11434"
+model = "huihui_ai/qwen3-abliterated:8b-v2"
+think = "false"
+fallback_host = "http://127.0.0.1:11434"
+
+[stt]
+# Pas de transcription distante : le jeton du Katana est un secret de la production.
+remote = ""
+
+[audio]
+mode = "none"
+
+[mail]
+enabled = false
+
+[presence]
+enabled = false
+
+[call]
+enabled = false
+
+[lights]
+enabled = false
+
+[spotify]
+enabled = false
+
+[tools.devices.mini]
+# Seul appareil déclaré, sans adresse : toute action sur un PC est refusée (aucun agent, aucun jeton).
+name = "le mini-PC"
+default = true
+aliases = ["mon pc", "le pc", "mini pc", "le serveur"]
+
+[api]
+enabled = true
+port = 8866
+allowed_ips = ["__PC__", "__KATANA__"]
+
+[face]
+enabled = true
+host = "0.0.0.0"
+port = 8865
+open_browser = false
+
+[wallpaper]
+enabled = true
+port = 8867
+allowed_ips = ["__PC__", "__KATANA__"]
+actions = false
+chat = true
+
+[platform]
+enabled = true
+
+[watch]
+enabled = true
+
+[news]
+enabled = true
+
+[news.feeds.france24]
+url = "https://www.france24.com/fr/rss"
+category = "geopolitique"
+reliability = "media"
+
+[news.feeds.lemonde_international]
+url = "https://www.lemonde.fr/international/rss_full.xml"
+category = "geopolitique"
+reliability = "media"
+
+[news.feeds.lemonde_defense]
+url = "https://www.lemonde.fr/defense/rss_full.xml"
+category = "defense"
+reliability = "media"
+
+[news.feeds.opex360]
+url = "https://www.opex360.com/feed/"
+category = "defense"
+reliability = "blog"
+
+[news.feeds.lemonde_pixels]
+url = "https://www.lemonde.fr/pixels/rss_full.xml"
+category = "tech_ia"
+reliability = "media"
+
+[news.feeds.lemonde_politique]
+url = "https://www.lemonde.fr/politique/rss_full.xml"
+category = "france"
+reliability = "media"
+
+[news.feeds.lemonde_economie]
+url = "https://www.lemonde.fr/economie/rss_full.xml"
+category = "economie"
+reliability = "media"
+
+[evolve]
+enabled = true
+
+[purchase]
+enabled = true

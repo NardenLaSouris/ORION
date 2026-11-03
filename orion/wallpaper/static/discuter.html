@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Discuter avec ORION</title>
+<style>
+  :root { --bg: #0b1220; --panel: #121b2e; --line: #23324f; --text: #e6edf7; --muted: #8fa3c2; --accent: #4fb3ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; min-height: 100vh; }
+  h1 { font-size: 1.2rem; margin: 0 0 12px; color: var(--accent); }
+  #log { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 10px 14px; border-radius: 12px; max-width: 85%; white-space: pre-wrap; overflow-wrap: break-word; }
+  .you { align-self: flex-end; background: #1d3557; }
+  .orion { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
+  .info { align-self: center; color: var(--muted); font-size: .9rem; }
+  form { display: flex; gap: 8px; margin-top: 12px; position: sticky; bottom: 0; background: var(--bg); padding: 8px 0; }
+  input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+          background: var(--panel); color: var(--text); font: inherit; }
+  button { padding: 10px 16px; border-radius: 10px; border: 0; background: var(--accent); color: #04121f;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Discuter avec ORION</h1>
+  <div id="log"></div>
+  <form id="form">
+    <input id="text" maxlength="500" autocomplete="off" placeholder="Votre demande…" autofocus>
+    <button id="send">Envoyer</button>
+  </form>
+</main>
+<script>
+(() => {
+  const log = document.getElementById("log");
+  const form = document.getElementById("form");
+  const input = document.getElementById("text");
+  const send = document.getElementById("send");
+  let token = "";
+
+  function add(kind, text) {
+    const div = document.createElement("div");
+    div.className = `msg ${kind}`;
+    div.textContent = text;
+    log.appendChild(div);
+    div.scrollIntoView({ block: "end" });
+  }
+
+  async function start() {
+    const config = await (await fetch("/config")).json();
+    token = config.token;
+    if (!config.chat) {
+      add("info", "Conversation écrite désactivée ([wallpaper] chat).");
+      send.disabled = true;
+      return;
+    }
+    for (const entry of await (await fetch("/chat")).json()) {
+      add("you", entry.you);
+      add("orion", entry.orion);
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = input.value.trim();
+    if (!text || send.disabled) return;
+    add("you", text);
+    input.value = "";
+    send.disabled = true;
+    try {
+      const response = await fetch("/say", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Orion-Token": token },
+        body: JSON.stringify({ text }),
+      });
+      const data = await response.json();
+      add(response.ok ? "orion" : "info", data.reply || data.error || "Pas de réponse.");
+    } catch (error) {
+      add("info", "ORION est injoignable.");
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  });
+
+  start().catch(() => add("info", "ORION est injoignable."));
+})();
+</script>
+</body>
+</html>

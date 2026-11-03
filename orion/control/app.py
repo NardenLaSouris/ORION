@@ -2,6 +2,8 @@
 
   pythonw -m orion.control            # ouvre l'interface
   pythonw -m orion.control --hidden   # démarre dans la zone de notification (démarrage automatique)
+  pythonw -m orion.control --profile v3   # environnement V3 isolé (réglages et jeton à part, sans raccourci clavier
+                                          # ni démarrage automatique : ceux de la production restent intacts)
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 from orion.control.bridge import Bridge
-from orion.control.settings import SettingsStore, app_dir
+from orion.control.settings import PROFILES, SettingsStore, app_dir
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +45,8 @@ def set_autostart(enabled: bool) -> None:
                    capture_output=True, timeout=30)
 
 
-def single_instance() -> bool:
-    ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\ORIONControl")
+def single_instance(profile: str = "") -> bool:
+    ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\ORIONControl" + profile)
     return ctypes.windll.kernel32.GetLastError() != 183
 
 
@@ -85,16 +87,17 @@ def tray_image():
 
 
 class ControlApp:
-    def __init__(self, bridge: Bridge, hidden: bool):
+    def __init__(self, bridge: Bridge, hidden: bool, title: str = TITLE, hotkey: bool = True):
         import webview
 
         self._webview = webview
         self.bridge = bridge
         self.visible = not hidden
-        self.window = webview.create_window(TITLE, bridge.url, width=1240, height=820, min_size=(960, 620),
+        self.title = title
+        self.window = webview.create_window(title, bridge.url, width=1240, height=820, min_size=(960, 620),
                                             background_color="#0b0f17", hidden=hidden)
         self.window.events.closing += self._on_closing
-        self.hotkey = Hotkey(self.toggle)
+        self.hotkey = Hotkey(self.toggle) if hotkey else None
         self.tray = None
         self._quitting = False
 
@@ -118,7 +121,8 @@ class ControlApp:
 
     def quit(self, *_args) -> None:
         self._quitting = True
-        self.hotkey.stop()
+        if self.hotkey is not None:
+            self.hotkey.stop()
         if self.tray is not None:
             self.tray.stop()
         self.bridge.stop()
@@ -129,26 +133,33 @@ class ControlApp:
 
         menu = pystray.Menu(pystray.MenuItem("Ouvrir / masquer (Ctrl+Shift+O)", self.toggle, default=True),
                             pystray.MenuItem("Quitter ORION Control", self.quit))
-        self.tray = pystray.Icon("jarvis-control", tray_image(), TITLE, menu)
+        self.tray = pystray.Icon("jarvis-control", tray_image(), self.title, menu)
         self.tray.run_detached()
-        self.hotkey.start()
+        if self.hotkey is not None:
+            self.hotkey.start()
         self._webview.start(gui="edgechromium", private_mode=True)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orion.control", description=TITLE)
     parser.add_argument("--hidden", action="store_true", help="démarrer dans la zone de notification")
+    parser.add_argument("--profile", choices=[p for p in PROFILES if p], default="",
+                        help="v3 : environnement de développement V3 isolé (réglages et jeton à part)")
     args = parser.parse_args(argv)
-    folder = app_dir()
+    title, core_url = PROFILES[args.profile]
+    folder = app_dir(args.profile)
     folder.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, filename=folder / "control.log", encoding="utf-8",
                         format="%(asctime)s %(levelname)s %(name)s : %(message)s")
-    if not single_instance():
-        ctypes.windll.user32.MessageBoxW(None, "ORION Control est déjà ouvert : Ctrl+Shift+O ou l'icône près de "
-                                               "l'horloge.", TITLE, 0x40)
+    if not single_instance(args.profile):
+        ctypes.windll.user32.MessageBoxW(None, f"{title} est déjà ouvert : l'icône près de l'horloge.", title, 0x40)
         return 0
-    bridge = Bridge(SettingsStore(folder), set_autostart)
+    if args.profile:  # jamais le jeton du dépôt (production), jamais le raccourci de démarrage de la production
+        store = SettingsStore(folder, env_file=None, core_url=core_url)
+        bridge = Bridge(store, lambda enabled: None)
+    else:
+        bridge = Bridge(SettingsStore(folder), set_autostart)
     bridge.start()
-    log.info("ORION Control démarré (Core : %s)", bridge.settings.core_url)
-    ControlApp(bridge, args.hidden).run()
+    log.info("%s démarré (Core : %s)", title, bridge.settings.core_url)
+    ControlApp(bridge, args.hidden, title, hotkey=not args.profile).run()
     return 0

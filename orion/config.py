@@ -379,6 +379,7 @@ class AudioConfig:
     input_device: str = ""
     output_device: str = ""
     remote: str = ""
+    mode: str = "devices"  # "none" : ni micro ni haut-parleur (environnement de test V3, conversation écrite)
     listen_timeout: float = 6.0
     end_of_speech_silence: float = 0.9
     max_utterance: float = 15.0

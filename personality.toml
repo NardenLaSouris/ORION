@@ -441,7 +441,10 @@ planner = true
 match = "contains"
 needs = "fragfactory_status"
 patterns = ["frag factory", "fragfactory", "clip", "clips", "pepite", "pepites", "montage", "montages",
-            "bilan de la nuit", "rapport de la nuit"]
+            "bilan de la nuit", "rapport de la nuit",
+            # suite d'une proposition de style (« dites « produis la version 1 » ») : la version, pas le clip
+            "produis la version", "produire la version", "applique la version", "lance la version",
+            "rends la version", "fais la version", "genere la version"]
 
 # Demandes qui nécessitent probablement des informations actuelles : recherche Web ([web] dans
 # config.toml). Testée après les intentions prédéfinies, les capacités et les demandes d'action indisponibles.

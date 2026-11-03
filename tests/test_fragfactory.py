@@ -646,7 +646,8 @@ def test_the_production_agent_template_has_no_frag_factory_section():
 
 
 @pytest.mark.parametrize("text", ["Valide le dernier clip.", "Refuse le dernier clip", "Montre-moi le dernier clip",
-                                  "Quels sont mes derniers clips ?", "C'est quoi le bilan de la nuit ?"])
+                                  "Quels sont mes derniers clips ?", "C'est quoi le bilan de la nuit ?",
+                                  "Produis la version 1.", "Applique la version 2"])
 def test_clip_requests_go_to_the_tools_never_to_a_web_search(text):
     """« Valide le dernier clip » partait en recherche Web (mot « dernier ») et recevait une réponse inventée qui
     affirmait la validation (essai réel du 4 novembre)."""

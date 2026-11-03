@@ -94,12 +94,35 @@ Il ne touche ni à `/opt/orion`, ni au service `orion`, ni à leurs comptes.
 ### Déploiement d'une version V3
 
 ```bash
-git -C /opt/orion-v3 fetch ~/orion-dev v3-sync && git -C /opt/orion-v3 merge --ff-only FETCH_HEAD
-sudo systemctl restart orion-v3
+bash /opt/orion-v3/deploy/v3_deploy.sh            # référence v3-sync du miroir ~/orion-dev
 ```
 
-Rollback V3 : `git -C /opt/orion-v3 reset --hard <commit précédent>` puis redémarrage. La production n'est jamais
-concernée.
+Le script (`deploy/v3_deploy.sh`) ne peut viser que la V3 :
+- **Cible fixe.** Le dossier, le service et le compte sont écrits en dur, et contrôlés auprès de systemd. Il refuse
+  de continuer si `config.local.toml` utilise un port de la production, ou si le dépôt V3 a des modifications
+  locales.
+- **Avance rapide seulement.** Une version qui ne descend pas de la version en place est refusée.
+- **Sauvegarde vérifiée avant chaque déploiement.** `scripts/v3_backup.py` la range dans
+  `~/sauvegardes/orion-v3/<date UTC>/`. Les 14 dernières sont gardées.
+- **Contrôle de santé.** Le service doit être actif, le journal ne doit contenir aucune trace d'erreur, les modules
+  doivent être démarrés et le visage doit répondre.
+- **Retour automatique en cas d'échec.** Le script revient au commit précédent et redémarre.
+- **Production prouvée intacte.** Son heure de démarrage est comparée avant et après.
+- **Journal** : `~/sauvegardes/orion-v3/deploiements.log`.
+
+Les deux chemins ont été essayés en réel le 4 novembre 2026 : un déploiement normal, et un commit jetable qui
+empêchait le Core de démarrer. Dans le second cas, la panne a été détectée et la V3 est revenue seule à la version
+précédente ; la production n'a pas été touchée.
+
+Restaurer les données :
+```bash
+sudo systemctl stop orion-v3
+/opt/orion-v3/.venv/bin/python /opt/orion-v3/scripts/v3_backup.py restore ~/sauvegardes/orion-v3/<date>
+sudo systemctl start orion-v3
+```
+- La restauration est refusée si le service tourne ou si la sauvegarde ne se vérifie pas (résumés SHA-256 et
+  `integrity_check`).
+- Les fichiers actuels sont mis de côté dans `data/avant-restauration-<date>/`, jamais effacés.
 
 ### Tester depuis vos appareils
 
@@ -173,7 +196,14 @@ Tout est appliqué par `sudo bash /home/user/orion-v3/deploy/v3_isolation.sh`.
   - le rechargement est idempotent.
 - `deploy/v3_env.sh` l'appelle désormais, pour une réinstallation.
 
-**État : demande `sudo` du propriétaire ; pas encore appliqué sur le mini-PC.**
+**État : appliqué par le propriétaire le 3 novembre 2026.** Contrôle du 4 novembre :
+- les règles installées (`/etc/orion-v3/isolation.nft`) sont identiques au dépôt ;
+- `ExecStartPre` les charge à chaque démarrage (statut 0) ;
+- `MemoryMax`, `CPUWeight` et `OOMScoreAdjust` sont actifs ;
+- `/opt/jarvis` est masqué ;
+- les comptes `orion-import` et `orion-evolve` sont installés.
+
+L'agent Windows V3 (port 8875 du PC) reste joignable, comme prévu.
 
 ### Risques acceptés
 

@@ -18,3 +18,13 @@ open_on_connect = false
 enabled = true
 redirect_uri = "http://localhost"   # à déclarer tel quel dans le Developer Portal (OAuth2 > Redirects)
 data_dir = "~/AppData/Local/ORION V3 Agent"
+
+# Frag Factory sur ce PC (docs/v3/fragfactory.md) : l'agent V3 relaie les demandes d'ORION V3 vers l'API locale de
+# Frag Factory, en boucle locale. Jeton de liaison FRAGFACTORY_LINK_TOKEN dans le .env de l'agent V3 (le même
+# qu'ORION_LINK_TOKEN de l'instance visée), jamais ici.
+# Instance visée : l'instance d'ESSAI aux données fictives (port 8752, deploy/v3_fragfactory_essai.ps1). Votre vraie
+# instance (port 8742) contient vos enregistrements et transcriptions : la viser est votre décision (url ci-dessous).
+[fragfactory]
+enabled = true
+url = "http://127.0.0.1:8752"
+timeout = 60.0

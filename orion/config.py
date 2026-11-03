@@ -498,12 +498,13 @@ class PurchaseConfig:
 class FragFactoryConfig:
     """Frag Factory (production de clips CS2 sur le PC fixe), supervisé par ORION. Inactif par défaut.
 
-    ORION l'atteint par l'agent Windows du PC (action « fragfactory », [fragfactory] de windows_agent.toml) : aucun
-    port de Frag Factory n'est ouvert sur le réseau. Les réglages modifiables (heure du rapport, canaux…) sont
-    ensuite gardés en base et réglés depuis ORION Control.
+    ORION l'atteint par l'agent Windows V3 du PC (action « fragfactory », [fragfactory] de deploy/v3_agent.toml),
+    jamais par l'agent de la production : aucun port de Frag Factory n'est ouvert sur le réseau. Les réglages
+    modifiables (heure du rapport, canaux…) sont ensuite gardés en base et réglés depuis ORION Control.
     """
     enabled: bool = False
-    device: str = ""  # appareil de [tools.devices] qui héberge Frag Factory ; vide : l'appareil par défaut
+    agent_url: str = ""  # agent Windows V3 (ex. http://192.168.1.128:8875)
+    token_env: str = "ORION_V3_AGENT_TOKEN"  # son jeton, dans le .env du Core V3
     poll_seconds: float = 30.0
     report_time: str = "08:00"
     timezone: str = "Europe/Paris"

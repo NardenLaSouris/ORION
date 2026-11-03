@@ -37,7 +37,7 @@ SYNC_JOB, REPORT_JOB = "fragfactory:sync", "fragfactory:report"
 NOTIFY_ORIGIN = "delegated:fragfactory:notifications"
 REPORT_ORIGIN = "delegated:fragfactory:report"
 CONTEXT_TTL = 30 * 60
-UNREACHABLE_CODES = frozenset({"device_unreachable", "fragfactory_unavailable", "link_not_configured", "http_503",
+UNREACHABLE_CODES = frozenset({"device_unreachable", "agent_offline", "agent_token", "fragfactory_unavailable", "link_not_configured", "http_503",
                                "timeout"})
 NOT_FOUND = (404, {"status": "error", "error": "not_found"})
 TIER_SPOKEN = {"pepite": "pépite", "bon": "bon clip", "a_trier": "à trier"}

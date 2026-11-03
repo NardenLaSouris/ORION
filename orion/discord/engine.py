@@ -22,17 +22,15 @@ Règles :
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from orion.personality import normalize
+from orion.platform.agentlink import AgentLink, AgentUnavailable
 from orion.platform.modules import NOT_FOUND, BaseModule
 from orion.platform.scheduler import Scheduler
 
@@ -44,51 +42,8 @@ OPENING = ("unmute", "undeafen")  # rouvrent le micro ou le son : jamais d'une i
 OFFLINE, ONLINE = "hors ligne", "en ligne"
 
 
-class DiscordUnavailable(Exception):
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code, self.message = code, message
-
-
-class AgentLink:
-    """``POST /actions/<action>`` sur l'agent Windows V3, avec son jeton (jamais celui de la production)."""
-
-    def __init__(self, url: str, token: str, timeout: float = 6.0, reachable: Callable[[str], bool] | None = None):
-        self.url = url.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {token.strip()}", "Content-Type": "application/json"}
-        self._timeout = timeout
-        if reachable is None:
-            from orion.llm.failover import tcp_reachable
-
-            reachable = lambda target: tcp_reachable(target, 1.0)  # noqa: E731
-        self._reachable = reachable
-
-    def call(self, action: str, parameters: dict | None = None, timeout: float | None = None) -> dict:
-        if not self._reachable(self.url):
-            raise DiscordUnavailable("agent_offline", "L'agent du PC ne répond pas.")
-        from orion import trace
-
-        headers = {**self._headers, **({trace.HEADER: trace.current()} if trace.current() else {})}
-        request = urllib.request.Request(f"{self.url}/actions/{action}", headers=headers,
-                                         data=json.dumps({"parameters": parameters or {}}).encode())
-        try:
-            with urllib.request.urlopen(request, timeout=timeout or self._timeout) as response:
-                return json.loads(response.read())["result"]
-        except urllib.error.HTTPError as exc:
-            try:
-                data = json.loads(exc.read())
-            except ValueError:
-                data = {}
-            code = data.get("error") if isinstance(data, dict) else ""
-            message = data.get("message") if isinstance(data, dict) else ""
-            if exc.code == 401:
-                code, message = "agent_token", "L'agent du PC refuse le jeton d'ORION V3."
-            # Réponse d'agent : seuls un code et un message courts et lisibles sont repris.
-            if not isinstance(message, str) or not message.isprintable() or len(message) > 200:
-                message = "Discord a refusé l'action."
-            raise DiscordUnavailable(str(code or "agent_error")[:48], message) from exc
-        except (OSError, ValueError, KeyError) as exc:
-            raise DiscordUnavailable("agent_offline", "L'agent du PC ne répond pas.") from exc
+# Erreurs de l'agent et du module : même type (code stable, message en français).
+DiscordUnavailable = AgentUnavailable
 
 
 @dataclass

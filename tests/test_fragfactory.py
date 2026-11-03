@@ -12,6 +12,7 @@ import io
 import json
 import urllib.error
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -573,3 +574,72 @@ def test_settings_are_validated_and_persisted():
 def test_publication_is_never_a_voice_tool():
     names = {t.name for t in fragfactory_tools(World().module)}
     assert len(names) == 14 and not any("publish" in n for n in names)
+
+
+# --- Agent Windows V3 (nuit du 4 novembre) ----------------------------------------------------------------------
+
+
+def test_the_core_reaches_frag_factory_through_the_v3_agent_only(monkeypatch, tmp_path):
+    """Transport du Core : agent V3 (agent_url + ORION_V3_AGENT_TOKEN) ; jamais [tools.devices] ni ORION_AGENT_TOKEN."""
+    from dataclasses import replace
+
+    import pytest
+
+    from orion.config import load_config
+    from orion.fragfactory import agent_transport
+    from orion.platform.agentlink import AgentLink
+
+    cfg = load_config(Path(__file__).resolve().parent.parent / "config.toml")
+    assert not hasattr(cfg.fragfactory, "device")
+    monkeypatch.setattr("orion.factory.ENV_FILE", tmp_path / "absent.env")
+    monkeypatch.delenv("ORION_V3_AGENT_TOKEN", raising=False)
+    monkeypatch.setenv("ORION_AGENT_TOKEN", "p" * 40)  # jeton de la production : jamais utilisé
+    with pytest.raises(ValueError):
+        agent_transport(replace(cfg, fragfactory=replace(cfg.fragfactory, enabled=True)))  # agent_url absent
+    with pytest.raises(ValueError):
+        agent_transport(replace(cfg, fragfactory=replace(cfg.fragfactory, enabled=True,
+                                                         agent_url="http://127.0.0.1:9")))  # jeton V3 absent
+    calls = []
+
+    def fake_call(self, action, parameters=None, timeout=None):
+        calls.append((self.url, self._headers["Authorization"], action, parameters))
+        return {"op": parameters["op"], "data": {"ok": 1}}
+
+    monkeypatch.setattr(AgentLink, "call", fake_call)
+    monkeypatch.setenv("ORION_V3_AGENT_TOKEN", "v" * 40)
+    call = agent_transport(replace(cfg, fragfactory=replace(cfg.fragfactory, enabled=True,
+                                                            agent_url="http://192.168.1.128:8875")))
+    assert call("status", {}) == {"ok": 1}
+    assert calls == [("http://192.168.1.128:8875", "Bearer " + "v" * 40, "fragfactory", {"op": "status", "args": {}})]
+
+
+def test_an_offline_v3_agent_reads_as_frag_factory_unavailable(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    from orion.config import load_config
+    from orion.fragfactory import agent_transport
+    from orion.fragfactory.engine import FragFactoryModule, Unavailable
+    from orion.platform.agentlink import AgentLink, AgentUnavailable
+    from orion.platform.store import Store
+
+    def offline(self, action, parameters=None, timeout=None):
+        raise AgentUnavailable("agent_offline", "L'agent du PC ne répond pas.")
+
+    monkeypatch.setattr(AgentLink, "call", offline)
+    monkeypatch.setenv("ORION_V3_AGENT_TOKEN", "v" * 40)
+    cfg = load_config(Path(__file__).resolve().parent.parent / "config.toml")
+    call = agent_transport(replace(cfg, fragfactory=replace(cfg.fragfactory, enabled=True,
+                                                            agent_url="http://192.168.1.128:8875")))
+    module = FragFactoryModule(Store(), call)
+    import pytest
+
+    with pytest.raises(Unavailable):
+        module.request("status")
+    assert module.status()["connected"] is False
+
+
+def test_the_production_agent_template_has_no_frag_factory_section():
+    text = (Path(__file__).resolve().parent.parent / "windows_agent.toml").read_text(encoding="utf-8")
+    assert "[fragfactory]" not in text
+    v3 = (Path(__file__).resolve().parent.parent / "deploy" / "v3_agent.toml").read_text(encoding="utf-8")
+    assert "[fragfactory]" in v3 and 'token_name = "ORION_V3_AGENT_TOKEN"' in v3

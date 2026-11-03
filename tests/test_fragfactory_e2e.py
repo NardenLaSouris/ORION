@@ -2,8 +2,10 @@
 
 - Frag Factory : **vrai serveur** (``python -m fragfactory serve``), dans son propre environnement, sur une base de
   test. Il a d'abord produit un vrai clip (``selftest`` : REC synthétique analysé puis rendu en 9:16 par FFmpeg).
-- Agent : **vrai serveur** ``AgentServer`` avec l'action ``fragfactory`` et un vrai jeton de liaison.
-- Core : module ORION avec le **vrai** ``AgentClient`` (jeton ``ORION_AGENT_TOKEN``) et le vrai ``ToolCore``.
+- Agent : **vrai serveur** ``AgentServer``, réglé comme l'agent Windows V3 (sans audio ni outils du PC), avec l'action
+  ``fragfactory`` et un vrai jeton de liaison.
+- Core : module ORION avec le **vrai** transport du Core (``agent_transport`` : agent V3, jeton
+  ``ORION_V3_AGENT_TOKEN``, jamais celui de la production) et le vrai ``ToolCore``.
 
 Ce qui n'est pas couvert : le mini-PC de production et le réseau local (tout tourne sur 127.0.0.1 de ce PC).
 
@@ -87,7 +89,6 @@ def chain(tmp_path_factory):
     from orion.platform.store import Store
     from orion.tools import ToolRegistry
     from orion.tools.core import ToolCore
-    from orion.tools.devices import AgentClient, Device
     from orion.tools.permissions import PermissionManager
     from orion.winagent.config import AgentConfig
     from orion.winagent.server import AgentServer
@@ -97,14 +98,20 @@ def chain(tmp_path_factory):
     ff.start()
     actions = ToolRegistry()
     actions.register(fragfactory_action(LinkClient(f"http://127.0.0.1:{ff.port}", token=LINK_TOKEN, timeout=60)))
-    agent = AgentServer(AgentConfig("127.0.0.1", 0, frozenset({"127.0.0.1"}), AGENT_TOKEN), actions)
+    agent = AgentServer(AgentConfig("127.0.0.1", 0, frozenset({"127.0.0.1"}), AGENT_TOKEN, audio=False,
+                                    pc_tools=False), actions)
     agent.start()
     host, port = agent.address
-    device = Device("pc", "le PC", f"http://{host}:{port}", (), True)
-    client = AgentClient(AGENT_TOKEN, timeout=60)
+    from dataclasses import replace
 
-    def transport(op, args):
-        return client.call(device, "fragfactory", {"op": op, "args": args})["data"]
+    from orion.config import load_config
+    from orion.fragfactory import agent_transport
+
+    os.environ["ORION_V3_AGENT_TOKEN"] = AGENT_TOKEN
+    cfg = load_config(Path(__file__).resolve().parent.parent / "config.toml")
+    cfg = replace(cfg, fragfactory=replace(cfg.fragfactory, enabled=True, agent_url=f"http://{host}:{port}",
+                                           timeout=60.0))
+    transport = agent_transport(cfg)
 
     spoken, written = [], []
     store = Store()

@@ -243,9 +243,13 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
         from orion.fragfactory import build_module
         from orion.fragfactory.tools import fragfactory_tools
 
-        fragfactory = build_module(cfg, store, alerts=alerts, scheduler=scheduler, history=history)
-        registry.register(fragfactory)
-        tools += fragfactory_tools(fragfactory)
+        try:
+            fragfactory = build_module(cfg, store, alerts=alerts, scheduler=scheduler, history=history)
+        except ValueError as exc:  # agent V3 ou jeton absent : le reste d'ORION démarre quand même
+            log.warning("Frag Factory : module non démarré (%s)", exc)
+        else:
+            registry.register(fragfactory)
+            tools += fragfactory_tools(fragfactory)
     if "discord" in wanted:
         from orion.config import secret
         from orion.factory import ENV_FILE

@@ -35,10 +35,3 @@ store = []          # paquets du Microsoft Store
 [face]
 open_on_connect = true
 port = 8765
-
-# Frag Factory sur ce PC (docs/v3/fragfactory.md) : l'agent relaie les demandes d'ORION vers l'API locale de Frag
-# Factory, en boucle locale. Jeton de liaison FRAGFACTORY_LINK_TOKEN dans le .env (le même qu'ORION_LINK_TOKEN dans
-# Frag Factory → Paramètres → Clés API), jamais ici.
-[fragfactory]
-enabled = false
-url = "http://127.0.0.1:8742"

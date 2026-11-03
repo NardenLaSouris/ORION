@@ -17,24 +17,24 @@ from orion.fragfactory.engine import FragFactoryModule, FragFactorySettings
 
 
 def agent_transport(cfg) -> Any:
-    """Transport du Core : action « fragfactory » de l'agent de l'appareil qui héberge Frag Factory."""
+    """Transport du Core : action « fragfactory » de l'agent Windows V3 (``agent_url``, jeton ``token_env``), jamais
+    l'agent ni le jeton de la production. Agent injoignable ou refus : ``ToolError`` au code stable (le module en
+    déduit « Frag Factory indisponible »)."""
     from orion.config import secret
     from orion.factory import ENV_FILE
-    from orion.tools.devices import AgentClient, load_devices
+    from orion.platform.agentlink import AgentLink, AgentUnavailable
+    from orion.tools.base import ToolError
 
-    devices = load_devices(cfg.tools.devices) if cfg.tools.enabled else None
-    if devices is None:
-        raise ValueError("[fragfactory] activé : déclarez le PC qui l'héberge dans [tools.devices] (url de son agent)")
-    key = cfg.fragfactory.device or devices.default.key
-    if key not in devices.keys():
-        raise ValueError(f"[fragfactory] device = {key!r} : appareil absent de [tools.devices]")
-    device = devices[key]
-    if not device.url:
-        raise ValueError(f"[fragfactory] device = {key!r} : cet appareil n'a pas d'agent (url)")
-    client = AgentClient(secret("ORION_AGENT_TOKEN", ENV_FILE), timeout=max(cfg.fragfactory.timeout, 5.0))
+    f = cfg.fragfactory
+    if not f.agent_url:
+        raise ValueError("[fragfactory] agent_url : adresse de l'agent Windows V3 (ex. http://192.168.1.128:8875)")
+    link = AgentLink(f.agent_url, secret(f.token_env, ENV_FILE), timeout=max(f.timeout, 5.0))
 
     def call(op: str, args: dict) -> Any:
-        result = client.call(device, "fragfactory", {"op": op, "args": args})
+        try:
+            result = link.call("fragfactory", {"op": op, "args": args}, timeout=max(f.timeout, 5.0))
+        except AgentUnavailable as exc:
+            raise ToolError(exc.code, exc.message) from exc
         return result.get("data") if isinstance(result, dict) else None
 
     return call

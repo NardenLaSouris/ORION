@@ -624,11 +624,13 @@ level = 1
 sandbox = true
 
 # Frag Factory (clips CS2 produits sur le PC fixe, docs/v3/fragfactory.md) : supervision, annonces des nouveaux clips,
-# validation vocale confirmée, bilan du matin. Inactif par défaut. ORION passe par l'agent Windows du PC (aucun port
-# de Frag Factory ouvert sur le réseau) ; heure du bilan, canaux et paliers se règlent ensuite dans ORION Control.
+# validation vocale confirmée, bilan du matin. Inactif par défaut. ORION passe par l'agent Windows V3 du PC (jamais
+# celui de la production ; aucun port de Frag Factory ouvert sur le réseau) ; heure du bilan, canaux et paliers se
+# règlent ensuite dans ORION Control.
 [fragfactory]
 enabled = false
-device = ""            # appareil de [tools.devices] qui héberge Frag Factory ; vide : l'appareil par défaut
+agent_url = ""                      # agent Windows V3, ex. "http://192.168.1.128:8875"
+token_env = "ORION_V3_AGENT_TOKEN"  # son jeton, dans le .env du Core
 poll_seconds = 30
 report_time = "08:00"
 timezone = "Europe/Paris"

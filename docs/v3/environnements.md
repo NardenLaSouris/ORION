@@ -69,7 +69,7 @@ moment.
 ### Installation (une seule fois, par le propriétaire : demande `sudo`)
 
 ```bash
-sudo bash /home/user/orion-dev/deploy/v3_env.sh
+sudo bash /home/user/orion-v3/deploy/v3_env.sh
 ```
 
 Le script `deploy/v3_env.sh` :

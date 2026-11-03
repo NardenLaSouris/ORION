@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Environnement de développement V3 isolé sur le mini-PC (docs/v3/environnements.md).
 #
-#   sudo bash /home/user/orion-dev/deploy/v3_env.sh
+#   sudo bash /home/user/orion-v3/deploy/v3_env.sh
 #
 # Crée le compte orion-v3, /opt/orion-v3 (branche v3-sync de ~/orion-dev), sa configuration, son jeton, le service
 # orion-v3 et le droit pour « user » de le redémarrer. Ne touche ni à /opt/orion, ni au service orion, ni à leurs
@@ -20,7 +20,8 @@ KATANA=192.168.1.73
 
 [ "$(id -u)" = 0 ] || { echo "À lancer avec sudo." >&2; exit 1; }
 [ -e "$DEST" ] && { echo "$DEST existe déjà : rien n'est modifié." >&2; exit 1; }
-git -C "$SRC" rev-parse --verify -q "$REF" >/dev/null || { echo "Branche $REF absente de $SRC." >&2; exit 1; }
+cd /
+sudo -u "$OWNER" git -C "$SRC" rev-parse --verify -q "$REF" >/dev/null || { echo "Branche $REF absente de $SRC." >&2; exit 1; }
 
 echo "1. Compte $ACCOUNT"
 if ! id "$ACCOUNT" >/dev/null 2>&1; then
@@ -39,7 +40,7 @@ sudo -u "$OWNER" git clone -q --branch "$REF" "$SRC" "$DEST"
 
 echo "3. Environnement Python et modèles (copies de la production, aucun lien)"
 cp -a "$PROD/.venv" "$DEST/.venv"
-cp -a "$PROD/models" "$DEST/models"
+install -d "$DEST/models" && cp -a "$PROD/models/." "$DEST/models/"
 
 echo "4. Données, configuration et jeton propres"
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 2770 "$DEST/data"

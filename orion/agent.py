@@ -183,6 +183,17 @@ ACK_QUESTION = "Pardon, je vous ai mal entendu. Est-ce noté ? Dites oui ou non.
 ACK_REFUSED = "Très bien, monsieur. Je vous écoute."
 
 
+# Demande d'actualités sans sujet précis (« quelles sont les actualités ? », « les infos du jour », « quoi de neuf ? »).
+GENERAL_NEWS = re.compile(r"^(?:(?:orion|jarvis|monsieur|dis moi|donne moi|alors)\s+)*(?:quelles? (?:sont )?)?"
+                          r"(?:les |des )?(?:dernieres |grandes |principales )?(?:actualites|actus|infos|informations|"
+                          r"nouvelles|news)(?: (?:du jour|d aujourd hui|de ce matin|de ce soir|importantes))?"
+                          r"(?: (?:aujourd hui|ce matin|ce soir))?$|^quoi de neuf(?: dans l actualite)?$")
+
+
+def general_news(text: str) -> bool:
+    return bool(GENERAL_NEWS.match(normalize(text).strip()))
+
+
 def agrees(text: str) -> bool:
     """« Oui », « lis-le », « qu'est-ce qu'il dit ? » : acceptation de la suite proposée par une annonce."""
     norm = re.sub(r"^(?:(?:orion|jarvis|monsieur|euh|bon|alors|eh|he)\s+)+", "", normalize(text)).strip()
@@ -897,6 +908,11 @@ class Agent:
         refused = self._guarded(text, latency)
         if refused is not None:
             return self._say_text(history, text, refused, latency)
+        if route.source == "web.search" and general_news(text) and self._tools is not None \
+                and self._tools.registry.exists("news_briefing"):
+            # « Quelles sont les actualités ? » : le journal de NEWS (sources suivies, vérifiées) plutôt qu'une
+            # recherche Web ; un sujet précis (« les actualités sur la Chine ») reste une recherche.
+            return self._use_tool(history, text, Route("tool", "news.briefing", tool="news_briefing"), latency)
         if route.source == "web.search":
             if self._degraded():
                 return self._say_phrase(history, text, "degraded_web", latency)

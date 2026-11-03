@@ -83,7 +83,8 @@ def test_deploy_script_targets_v3_only():
     for line in script.splitlines():
         if "systemctl" in line and ("restart" in line or "stop" in line):
             assert '"$SERVICE"' in line  # aucune commande d'arrêt ou de redémarrage ne vise un autre service
-    assert "| grep -q" not in script  # sous pipefail, un grep -q qui trouve fait échouer le tube (SIGPIPE)
+    code = [line for line in script.splitlines() if not line.lstrip().startswith("#")]
+    assert not any("| grep -q" in line for line in code)  # sous pipefail, un grep -q qui trouve fait échouer le tube (SIGPIPE)
     bash = shutil.which("bash")
     if bash:
         assert subprocess.run([bash, "-n", str(ROOT / "deploy" / "v3_deploy.sh")]).returncode == 0

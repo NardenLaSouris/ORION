@@ -13,11 +13,13 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
   - Données, configuration et routines rendues compatibles, sans rien écraser : copies `*.v3-2026-11-03`.
   - Instantané de l'état V3 de la production : `~/orion-prod-v3-2026-11-03.tar.gz`.
   - ORION Control du PC fixe et Katana remis sur le code V2.
-- **Environnement V3 isolé :** préparé et testé.
-  - Script `deploy/v3_env.sh` : essai complet en conteneur ; le Core V3 a aussi tourné sur des données temporaires.
-  - **En attente d'une commande `sudo` du propriétaire** :
-    `sudo bash /home/user/orion-v3/deploy/v3_env.sh`.
-  - Ensuite, déploiements V3 dans `/opt/orion-v3` uniquement.
+- **Environnement V3 isolé : installé le 3 novembre** (`/opt/orion-v3`, service `orion-v3`, compte `orion-v3`).
+  - Version `cf7baa9` ; base personnelle verrouillée (aucune clé).
+  - Contrôlé : compte hors des groupes d'ORION, production masquée par le service, ports 8865 à 8867 joignables
+    depuis le PC, API refusée sans jeton, conversation écrite qui répond.
+  - Redémarrage sans mot de passe : `sudo systemctl restart orion-v3` (ce service seulement).
+  - ORION Control V3 : `pythonw -m orion.control --profile v3` depuis `C:\Users\theju\orion-v3`, jeton V3 rangé
+    dans `%APPDATA%/ORION Control V3`.
 
 ## Fait
 
@@ -38,9 +40,7 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 
 ## Prochain chantier
 
-1. Dès l'installation de l'environnement V3 : déployer `v3` dans `/opt/orion-v3`, contrôler l'isolation (compte,
-   ports, pare-feu, aucune lecture de `/opt/orion`), puis faire un premier essai depuis le PC (`/discuter`, ORION
-   Control V3).
+1. Essais du propriétaire sur l'environnement V3 (`http://192.168.1.91:8867/discuter`, ORION Control V3).
 2. NEWS P1 en parallèle, sans toucher au socle : fiabilité des sources, journal sans données personnelles.
 3. F5 (ressources et mode dégradé, comptes `orion-import` et `orion-evolve`), après accord.
 

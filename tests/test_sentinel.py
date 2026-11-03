@@ -162,3 +162,12 @@ def test_build_needs_the_foundation(tmp_path):
         assert "sentinel_status" in {t.name for t in modules.tools}
     finally:
         modules.stop()
+
+
+def test_questions_may_reach_read_only_v3_tools():
+    from orion.tools.planner import READ_ONLY_TOOLS, _question
+
+    assert _question("Comment va le système ?") and _question("Quelles sont les actualités ?")
+    for tool in ("sentinel_status", "news_bulletin", "news_briefing", "news_more", "missed_notifications"):
+        assert tool.startswith(READ_ONLY_TOOLS)
+    assert not "deliver_news_bulletin".startswith(READ_ONLY_TOOLS)  # ouvre une page sur le PC : une action

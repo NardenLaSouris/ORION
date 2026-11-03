@@ -408,6 +408,8 @@ DOMAIN_WORDS = {
     "news_bulletin": ("actualite", "actualites", "actu", "actus", "infos", "informations", "nouvelles", "bulletin",
                       "journal", "news"),
     "news_briefing": ("journal", "nouvelles du jour", "actualite", "actualites", "infos", "news"),
+    "sentinel_status": ("systeme", "fonctionne", "fonctionnent", "marche", "katana", "sante", "panne", "pannes",
+                        "incident", "incidents"),
     "news_more": ("approfondis", "approfondir", "detaille", "details", "parle moi", "premiere", "deuxieme",
                   "troisieme", "quatrieme", "cinquieme", "info", "information", "numero"),
     # WATCH (V3) : une information extérieure à surveiller.
@@ -459,7 +461,9 @@ DEFERRED_TOOLS = ("create_reminder", "cancel_reminder", "cancel_all_reminders", 
 
 
 READ_ONLY_TOOLS = ("get_", "list_", "light_status", "find_", "read_", "recall", "search_", "next_", "free_",
-                   "system_info", "network_status", "spotify_status", "check_mail", "summarize_mail")
+                   "system_info", "network_status", "spotify_status", "check_mail", "summarize_mail",
+                   # V3, lecture seule : actualités (bulletin, journal, fiche), santé, notifications manquées
+                   "news_", "sentinel_status", "missed_notifications")
 QUESTION = re.compile(r"^(?:jarvis )?(?:est ce que|est ce qu|est il|est elle|y a t il|qu est ce qui|quel|quelle|quels|"
                       r"quelles|combien|pourquoi|comment|ou est|quand)\b")
 REQUEST = re.compile(r"\b(?:tu peux|peux tu|tu pourrais|pourrais tu|vous pouvez|pouvez vous|vous pourriez|"

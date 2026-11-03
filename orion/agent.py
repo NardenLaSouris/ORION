@@ -1128,13 +1128,15 @@ class Agent:
             return data
         resolved = {}
         for key, param in self._tools.registry.get(name).parameters.items():
-            if not param.hidden or param.resolve is None or key in parameters:
+            if not param.hidden or param.resolve is None or (key in parameters and not param.reread):
                 continue
             value = param.resolve(text)
             if segment is not None:
                 own = param.resolve(segment)
                 value = own if own != param.resolve("") else (previous or {}).get(key, value)
-            if value is not None:
+            if key in parameters and value == param.resolve(""):
+                continue  # valeur reprise d'une relance, et rien dans les nouveaux mots : elle reste
+            if value is not None:  # ``reread`` : les mots l'emportent (« et la dernière ? » après « la deuxième »)
                 resolved[key] = value
         return {**data, "parameters": {**parameters, **resolved}} if resolved else data
 

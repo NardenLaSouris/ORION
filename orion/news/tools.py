@@ -67,7 +67,7 @@ def news_tools(engine: NewsEngine) -> list[Tool]:
         return {"text": detail(item)[:MAX_SPOKEN], "number": item["number"]}
 
     number = Param(int, "numéro de l'information dans le journal", required=False, minimum=-1, maximum=20,
-                   hidden=True, resolve=ordinal)
+                   hidden=True, resolve=ordinal, reread=True)
     subject = Param(str, "sujet de l'information, avec les mots de la demande", required=False, max_length=120)
     return [Tool("news_bulletin", "Donne les actualités importantes (dernier bulletin d'ORION NEWS).", {},
                  {"text": "bulletin"}, Risk.SAFE, bulletin, say=lambda r: r["text"]),

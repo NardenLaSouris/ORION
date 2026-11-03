@@ -60,6 +60,9 @@ class Param:
     # Valeur facultative non justifiée par la demande : retirée (l'action garde son sens) plutôt qu'appel écarté.
     # Seulement là où l'omettre ne change pas la cible (durée d'un rendez-vous inventée : « 1 heure »).
     drop_unsaid: bool = False
+    # Paramètre masqué relu dans chaque demande, même repris d'une relance (« et la dernière ? ») ; sinon une valeur
+    # posée par le contexte de la conversation (« l'autre pièce ») n'est jamais remplacée.
+    reread: bool = False
 
 
 @dataclass(frozen=True)

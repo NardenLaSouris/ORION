@@ -214,3 +214,20 @@ def test_last_item_by_ordinal():
     count = len(w.engine.current_journal()["items"])
     assert more.run(numero=-1)["number"] == count
     assert more.parameters["numero"].hidden  # le LLM ne le propose jamais
+
+
+def test_a_follow_up_takes_the_number_from_its_own_words():
+    from types import SimpleNamespace
+
+    from orion.agent import Agent
+    from orion.tools.registry import ToolRegistry
+
+    w = collected_world()
+    registry = ToolRegistry()
+    for tool in news_tools(w.engine):
+        registry.register(tool)
+    agent = Agent.__new__(Agent)
+    agent._tools = SimpleNamespace(registry=registry)
+    carried = {"type": "tool_call", "tool": "news_more", "parameters": {"numero": 2}}
+    assert agent._with_hidden(carried, "Et la dernière ?")["parameters"]["numero"] == -1
+    assert agent._with_hidden(carried, "Et encore ?")["parameters"]["numero"] == 2  # rien de nouveau : gardé

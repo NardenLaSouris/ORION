@@ -103,7 +103,17 @@ visudo -cqf "$RULES"
 install -o root -g root -m 440 "$RULES" /etc/sudoers.d/orion-v3
 rm -f "$RULES"
 
-echo "7. Contrôle de l'isolation"
+echo "7. Pare-feu : ports 8865 à 8867 ouverts au PC et au Katana seulement"
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+  for ip in "$PC" "$KATANA"; do
+    ufw allow proto tcp from "$ip" to any port 8865:8867 comment "ORION V3" >/dev/null
+  done
+  echo "   règles ufw ajoutées."
+else
+  echo "   ufw inactif : aucune règle ajoutée."
+fi
+
+echo "8. Contrôle de l'isolation"
 if sudo -u "$ACCOUNT" test -r "$PROD/data" || sudo -u "$ACCOUNT" test -r "$PROD/.env"; then
   echo "Le compte $ACCOUNT peut lire la production : service non démarré." >&2; exit 1
 fi

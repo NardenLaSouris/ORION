@@ -9,6 +9,11 @@ host = "http://192.168.1.73:11434"
 model = "huihui_ai/qwen3-abliterated:8b-v2"
 think = "false"
 fallback_host = "http://127.0.0.1:11434"
+fallback_model = "qwen2.5:3b"
+# Ollama est partagé avec la production : même durée de maintien en mémoire qu'elle, sinon chaque demande V3
+# raccourcirait celle des modèles chargés et la production devrait les relire (jusqu'à 2 minutes sans GPU).
+keep_alive = "-1m"
+timeout = 20.0
 
 [stt]
 # Pas de transcription distante : le jeton du Katana est un secret de la production.
@@ -32,11 +37,43 @@ enabled = false
 [spotify]
 enabled = false
 
-[tools.devices.mini]
-# Seul appareil déclaré, sans adresse : toute action sur un PC est refusée (aucun agent, aucun jeton).
-name = "le mini-PC"
-default = true
-aliases = ["mon pc", "le pc", "mini pc", "le serveur"]
+# Aucun agent de PC (son jeton est un secret de la production) : les outils qui agissent sur un PC sont retirés,
+# ils agiraient sinon sur le mini-PC lui-même.
+[tools.open_url]
+enabled = false
+
+[tools.open_application]
+enabled = false
+
+[tools.close_application]
+enabled = false
+
+[tools.list_running_applications]
+enabled = false
+
+[tools.set_volume]
+enabled = false
+
+[tools.mute_volume]
+enabled = false
+
+[tools.unmute_volume]
+enabled = false
+
+[tools.lock_pc]
+enabled = false
+
+[tools.shutdown_pc]
+enabled = false
+
+[tools.media_play_pause]
+enabled = false
+
+[tools.media_next]
+enabled = false
+
+[tools.media_previous]
+enabled = false
 
 [api]
 enabled = true

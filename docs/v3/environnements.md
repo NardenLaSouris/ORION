@@ -17,7 +17,9 @@ dépendance avec la production.
 | ORION Control | raccourci « ORION Control » (`C:\Users\theju\jarvis`, branche `V2`) | `python -m orion.control --profile v3` (`C:\Users\theju\orion-v3`), réglages à part |
 
 Partagés en lecture seulement, sans donnée personnelle : les modèles LLM (Ollama du mini et du Katana) et SearXNG
-(recherche Web publique). Le compte `orion-v3` ne peut pas lire `/opt/orion` (droits 750, groupe `orion`), et le
+(recherche Web publique). Ollama garde les modèles en mémoire selon la dernière demande reçue : la V3 envoie le même
+`keep_alive` que la production, sinon elle ferait décharger les modèles de celle-ci. Les deux environnements se
+partagent aussi le temps de calcul du Katana et du mini. Le compte `orion-v3` ne peut pas lire `/opt/orion` (droits 750, groupe `orion`), et le
 service lui masque en plus `/opt/orion`, `/etc/orion-call`, `/var/lib/orion` et `/var/lib/orion-call`.
 
 ## 1. Retour de la production en V2
@@ -79,7 +81,13 @@ Le script `deploy/v3_env.sh` :
 - génère un jeton propre (`ORION_AGENT_TOKEN`), sans jamais lire le `.env` de la production ;
 - écrit la configuration à partir de `deploy/v3_env.toml` ;
 - installe `orion-v3.service` (même durcissement que `orion`, plus les chemins de la production masqués) ;
-- autorise `user` à redémarrer ce seul service sans mot de passe (`/etc/sudoers.d/orion-v3`, vérifié par `visudo`).
+- autorise `user` à redémarrer ce seul service sans mot de passe (`/etc/sudoers.d/orion-v3`, vérifié par `visudo`) ;
+- ouvre dans `ufw` les ports 8865 à 8867 au PC fixe et au Katana seulement ;
+- vérifie que le compte `orion-v3` ne peut pas lire la production avant de démarrer le service.
+
+Essai complet du script dans un conteneur jetable, avec une fausse production : compte, droits, jeton, configuration,
+règle sudo, contrôle d'isolation, refus d'une seconde installation. Essai du Core V3 avec données temporaires :
+démarrage, conversation écrite (heure, rappel), extinction du PC refusée.
 
 Il ne touche ni à `/opt/orion`, ni au service `orion`, ni à leurs comptes.
 
@@ -106,6 +114,8 @@ concernée.
 sudo systemctl disable --now orion-v3
 sudo rm /etc/systemd/system/orion-v3.service /etc/sudoers.d/orion-v3
 sudo systemctl daemon-reload
+sudo ufw delete allow proto tcp from 192.168.1.128 to any port 8865:8867
+sudo ufw delete allow proto tcp from 192.168.1.73 to any port 8865:8867
 ```
 
 Le dossier `/opt/orion-v3` et le compte `orion-v3` peuvent ensuite être retirés à la main ; seules des données

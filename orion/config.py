@@ -137,6 +137,7 @@ class ToolsConfig:
     mute_volume: dict = field(default_factory=dict)
     unmute_volume: dict = field(default_factory=dict)
     lock_pc: dict = field(default_factory=dict)
+    shutdown_pc: dict = field(default_factory=dict)
     media_play_pause: dict = field(default_factory=dict)
     media_next: dict = field(default_factory=dict)
     media_previous: dict = field(default_factory=dict)

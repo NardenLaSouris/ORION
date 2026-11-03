@@ -67,7 +67,12 @@ def test_v3_template_isolates_from_production(tmp_path):
     assert cfg.audio.mode == "none" and not cfg.audio.remote and not cfg.stt.remote
     assert not (cfg.mail.enabled or cfg.call.enabled or cfg.presence.enabled or cfg.lights.enabled
                 or cfg.spotify.enabled)
-    assert all(not getattr(device, "url", "") for device in cfg.tools.devices.values())  # aucun agent de PC
+    assert not cfg.tools.devices  # aucun agent de PC
+    from orion.tools.builtin import PC_TOOLS, builtin_tools
+
+    names = {tool.name for tool in builtin_tools(cfg.tools.settings())}
+    assert names & set(PC_TOOLS) <= {"system_info"}  # rien n'agirait sur le mini-PC lui-même
+    assert cfg.llm.keep_alive == "-1m" and cfg.llm.fallback_model  # Ollama partagé : rien n'est déchargé
     ports = {cfg.face.port, cfg.api.port, cfg.wallpaper.port}
     assert ports == {8865, 8866, 8867} and not ports & PROD_PORTS
     assert {str(ip) for ip in cfg.api.allowed_ips} == {PC, KATANA}

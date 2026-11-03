@@ -434,6 +434,15 @@ patterns = ["discord", "vocal", "salon vocal", "mute moi", "mute", "demute", "de
             "enleve la sourdine", "retire la sourdine", "mon micro", "le micro", "rejoins", "rejoint",
             "reactive le son", "remets le son", "suis je en sourdine", "en sourdine"]
 
+# Frag Factory (module V3, [fragfactory]) : clips CS2, validation, refus, versions, bilan. Testée avant la recherche
+# Web : « valide le dernier clip » (le mot « dernier ») partait en recherche et recevait une réponse inventée.
+[intents."tool.fragfactory"]
+planner = true
+match = "contains"
+needs = "fragfactory_status"
+patterns = ["frag factory", "fragfactory", "clip", "clips", "pepite", "pepites", "montage", "montages",
+            "bilan de la nuit", "rapport de la nuit"]
+
 # Demandes qui nécessitent probablement des informations actuelles : recherche Web ([web] dans
 # config.toml). Testée après les intentions prédéfinies, les capacités et les demandes d'action indisponibles.
 # Un seul de ces mots ou expressions suffit. Quand la recherche est active, elle remplace le repli

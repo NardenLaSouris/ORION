@@ -643,3 +643,30 @@ def test_the_production_agent_template_has_no_frag_factory_section():
     assert "[fragfactory]" not in text
     v3 = (Path(__file__).resolve().parent.parent / "deploy" / "v3_agent.toml").read_text(encoding="utf-8")
     assert "[fragfactory]" in v3 and 'token_name = "ORION_V3_AGENT_TOKEN"' in v3
+
+
+@pytest.mark.parametrize("text", ["Valide le dernier clip.", "Refuse le dernier clip", "Montre-moi le dernier clip",
+                                  "Quels sont mes derniers clips ?", "C'est quoi le bilan de la nuit ?"])
+def test_clip_requests_go_to_the_tools_never_to_a_web_search(text):
+    """« Valide le dernier clip » partait en recherche Web (mot « dernier ») et recevait une réponse inventée qui
+    affirmait la validation (essai réel du 4 novembre)."""
+    from orion.capabilities import CapabilityRegistry
+    from orion.personality import load_personality
+    from orion.router import IntentRouter
+
+    names = ("fragfactory_status", "fragfactory_approve_clip", "fragfactory_list_clips")
+    router = IntentRouter(load_personality(Path(__file__).resolve().parent.parent / "personality.toml"),
+                          CapabilityRegistry(), web_enabled=True, tools=names)
+    assert router.route(text).source == "tool"
+    without = IntentRouter(load_personality(Path(__file__).resolve().parent.parent / "personality.toml"),
+                           CapabilityRegistry(), web_enabled=True, tools=("get_time",))
+    assert without.route("Valide le dernier clip.").source == "web.search"  # module absent : intention ignorée
+
+
+def test_a_claimed_validation_without_tool_is_caught():
+    from orion.router import claims_action
+
+    assert claims_action("Le dernier clip a été validé. Il s'agit d'une vidéo YouTube.")
+    assert claims_action("Votre micro est coupé.")
+    assert not claims_action("Le clip n'a pas été validé.")
+    assert not claims_action("Le match a été annulé à cause de la pluie.")  # actualité : pas une action d'ORION

@@ -207,6 +207,9 @@ def planner_prompt(registry: ToolRegistry) -> str:
         rules.append("- « Le journal », « les nouvelles du jour », « mon journal » : news_briefing. « Approfondis / "
                      "détaille la deuxième », « parle-moi de l'info sur… » : news_more (sujet seulement si la demande nomme un "
                      "sujet ; le numéro est lu dans la demande).")
+    if registry.exists("sentinel_status"):
+        rules.append("- « Comment va le système / ORION ? », « tout fonctionne ? », « le Katana répond ? » : "
+                     "sentinel_status.")
     if registry.exists("create_watch"):
         rules.append("- « Surveille… », « préviens-moi quand » un prix baisse, un produit revient en stock, un événement "
                      "de jeu ou une annonce officielle sort : create_watch (information extérieure), jamais "

@@ -463,6 +463,15 @@ class EvolveConfig:
 
 
 @dataclass(frozen=True)
+class SentinelConfig:
+    """SENTINEL (docs/v3/sentinel.md) : santé d'ORION et de ses ressources, lecture seule. Exige [platform]."""
+    enabled: bool = False
+    probe_seconds: float = 60.0
+    history_days: int = 7
+    notify_after_seconds: float = 120.0  # panne annoncée seulement au-delà (pas de bruit pour une micro-coupure)
+
+
+@dataclass(frozen=True)
 class PurchaseConfig:
     enabled: bool = False
     level: int = 1  # 1 : ORION prépare et demande confirmation ; 2 et 3 : activation explicite (voir orion/purchase)
@@ -505,6 +514,7 @@ class Config:
     news: NewsConfig = NewsConfig()
     evolve: EvolveConfig = EvolveConfig()
     purchase: PurchaseConfig = PurchaseConfig()
+    sentinel: SentinelConfig = SentinelConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -635,6 +645,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "watch": WatchConfig,
         "news": NewsConfig,
         "evolve": EvolveConfig,
+        "sentinel": SentinelConfig,
         "purchase": PurchaseConfig,
     }
     tables = {key: raw.pop(key, {}) for key in ("users", "terminals")}

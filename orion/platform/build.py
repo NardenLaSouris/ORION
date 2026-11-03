@@ -85,7 +85,8 @@ class NotificationsModule(BaseModule):
 JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.value),
                "news:journal": ("delegated:news:journal", Capability.NOTIFY.value),
                "news:collect": ("module:news", Capability.READ.value),
-               "evolve:scan": ("module:evolve", Capability.READ.value)}
+               "evolve:scan": ("module:evolve", Capability.READ.value),
+               "sentinel:probe": ("module:sentinel", Capability.READ.value)}
 
 
 def classify_job(job_id: str) -> tuple[str, str]:
@@ -107,7 +108,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
              foundation=None) -> V3Modules | None:
     """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
     planificateur s'arrête net sur arrêt d'urgence."""
-    wanted = [name for name in ("watch", "news", "evolve", "purchase") if getattr(cfg, name).enabled]
+    wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel") if getattr(cfg, name).enabled]
     if not wanted:
         return None
     m = cfg.modules
@@ -218,6 +219,19 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                   gate=permits.gate("delegated:purchase") if permits else None)
         registry.register(purchase)
         tools += purchase_tools(purchase)
+    if "sentinel" in wanted:
+        if foundation is None:
+            log.warning("SENTINEL : [platform] désactivé, pas de service de ressources : SENTINEL non démarré")
+        else:
+            from orion.sentinel import SentinelEngine, SentinelSettings
+            from orion.sentinel.tools import sentinel_tools
+
+            s = cfg.sentinel
+            sentinel = SentinelEngine(store, foundation.resources, alerts=alerts, scheduler=scheduler, history=history,
+                                      settings=SentinelSettings(s.probe_seconds, history_days=s.history_days,
+                                                                notify_after_seconds=s.notify_after_seconds))
+            registry.register(sentinel)
+            tools += sentinel_tools(sentinel)
     modules = V3Modules(store, scheduler, alerts, registry, tools)
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)
     return modules

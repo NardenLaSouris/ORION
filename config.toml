@@ -600,6 +600,13 @@ journal_enabled = true
 enabled = false
 level = 1
 
+# Santé d'ORION et de ses ressources (docs/v3/sentinel.md) : lecture seule ; exige [platform].
+[sentinel]
+enabled = false
+probe_seconds = 60.0
+history_days = 7
+notify_after_seconds = 120.0
+
 # Achats sous mandat (docs/v3/purchase.md) : bac à sable seulement, niveau 1 (confirmation) par défaut.
 [purchase]
 enabled = false

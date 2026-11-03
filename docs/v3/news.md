@@ -113,6 +113,55 @@ reliability = "agency"      # official, agency, media, blog
 Aucun flux n'est livré par défaut : leur choix vous revient, ainsi que le respect des conditions d'utilisation des
 éditeurs.
 
+## Journal quotidien (lot P1, sans données personnelles)
+
+Spécification : `news_personal_intelligence.md` § 4. Code : `orion/news/briefing.py` (composition déterministe),
+`engine.journal`, `page.render_journal`, outils `news_briefing` et `news_more`.
+
+- **Quand :** chaque jour à 07:30 (`[news] journal_time`, réglable dans ORION Control). Il est rattrapé jusqu'à 2 h
+  après un redémarrage, jamais en double.
+  - C'est une tâche que vous avez programmée (`delegated:news:journal`) : elle part pendant la suspension de
+    l'autonomie, pas pendant l'arrêt d'urgence.
+  - Il s'ajoute aux bulletins de 08:00 et 20:00, qui restent tant que le journal n'est pas validé.
+- **Candidats :** événements mis à jour depuis le précédent journal (24 h au plus), au-dessus du seuil « bulletin ».
+- **Exclus :**
+  - les doublons : déjà dans le précédent journal, sans fait nouveau ;
+  - les titres trompeurs : titre à sensation (mots-signaux, majuscules, « !! ») sans confirmation, ou chiffre du
+    titre absent de tous les textes d'une information non confirmée.
+
+  Les raisons sont gardées (`excluded`) et comptées sur la page.
+- **Sélection :**
+  - « À ne pas manquer » (niveau alerte) toujours repris ;
+  - 10 informations au plus, 3 au plus par rubrique ;
+  - au moins une « International » et une « Économie » quand il y en a ;
+  - jusqu'à 5 avec des sujets moins importants (au moins la moitié du seuil) quand l'actualité est maigre, jamais
+    au-delà.
+- **Rubriques :** À ne pas manquer, Vos sujets (vide jusqu'au moteur d'intérêts, P3), Évolutions des sujets suivis,
+  Technologie et sciences, International (géopolitique, défense), Économie, France.
+- **Fiche :**
+  - le titre de l'article le plus fiable, jamais réécrit ;
+  - le résumé vérifié, ou celui de la source ;
+  - les faits confirmés et les éléments incertains ;
+  - la date de publication, la source et le lien, et les autres sources ;
+  - la fiabilité : « Source officielle », « Confirmée par N sources indépendantes » ou « Source unique, non
+    confirmée » ;
+  - pourquoi l'information est là.
+- **Diffusion :** routeur d'alertes (voix à la maison, sinon écrit ; heures calmes). Version dite : le nombre
+  d'informations, cinq titres numérotés, puis « Voulez-vous des détails sur l'une d'elles ? ».
+- **Accès :**
+  - « le journal » (`news_briefing`) ;
+  - « approfondis la deuxième », « parle-moi de l'info sur la BCE » (`news_more`) ;
+  - page `/journal` du fond d'écran ;
+  - section « Journal » de la vue Actualités d'ORION Control, avec un aperçu jamais compté comme envoyé ;
+  - routes `GET/POST /api/modules/news/journals` et `GET …/journals/page`.
+- **Catégorie `sciences` :** Le Monde Sciences, franceinfo Sciences, Sciences et Avenir et l'ESA, qui est une source
+  officielle. Elle s'ajoute aux sources de franceinfo (Monde, Économie, Politique) pour les confirmations croisées.
+  Tous ces flux ont été vérifiés le 3 novembre 2026. Numerama (403) et Les Échos (503) sont écartés.
+- **Pas encore fait (lots suivants) :**
+  - les boutons « lu », « masquer », « suivre » et « pas pertinent », qui sont des interactions personnelles (P4) ;
+  - la confirmation des titres trompeurs par le LLM ;
+  - l'essai réel d'une semaine, en cours dans l'environnement V3.
+
 ## Limites connues
 
 - **Calibrage :** le lexique de gravité et les seuils ont été réglés sur des exemples, pas sur une semaine de vraie

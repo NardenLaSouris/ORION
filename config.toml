@@ -585,6 +585,10 @@ default_interval_minutes = 60.0
 [news]
 enabled = false
 bulletin_times = ["08:00", "20:00"]
+# Journal quotidien sans données personnelles (rubriques, fiches avec lien et fiabilité, titres trompeurs écartés) :
+# outils news_briefing (« le journal ») et news_more (« approfondis la deuxième »), page /journal du fond d'écran.
+journal_time = "07:30"
+journal_enabled = true
 
 # Maintenance et évolution du code (docs/v3/evolve.md) : niveau 1 observateur, 2 développeur ; 3 refusé.
 [evolve]

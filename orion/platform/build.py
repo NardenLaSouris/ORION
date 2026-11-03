@@ -77,11 +77,13 @@ class NotificationsModule(BaseModule):
 # Classification des tâches périodiques des modules (CORE FOUNDATION F2), faite par la plateforme et non par les
 # modules : (principal, capacité). Ce que vous avez programmé ou réglé part sous « delegated:… » et continue pendant
 # la suspension ; une initiative de module sous « module:… ».
-#   - news:bulletins : bulletins aux heures que vous avez réglées -> tâche programmée (NOTIFY) ;
+#   - news:bulletins, news:journal : bulletins et journal aux heures que vous avez réglées -> tâche programmée
+#     (NOTIFY) ;
 #   - news:collect : collecte des flux (lecture) ; ses alertes spontanées déclarent « module:news » ;
 #   - watch:<id> : surveillance que vous avez créée ;
 #   - evolve:scan : analyse des journaux, initiative d'EVOLVE (lecture).
 JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.value),
+               "news:journal": ("delegated:news:journal", Capability.NOTIFY.value),
                "news:collect": ("module:news", Capability.READ.value),
                "evolve:scan": ("module:evolve", Capability.READ.value)}
 
@@ -156,7 +158,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                           llm=structured if n.use_llm else None,
                           settings=NewsSettings(tuple(n.bulletin_times), tuple(n.categories), dict(n.thresholds), {},
                                                 n.max_calls_per_day, n.min_call_interval_minutes,
-                                                collect_minutes=n.collect_minutes))
+                                                collect_minutes=n.collect_minutes, journal_time=n.journal_time,
+                                                journal_enabled=n.journal_enabled))
         registry.register(news)
         tools += news_tools(news)
         if foundation is not None:

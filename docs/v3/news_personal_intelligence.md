@@ -263,7 +263,7 @@ Interest
 
 | Lot | Contenu | Validation |
 |---|---|---|
-| P1 | Briefing sans données personnelles : rubriques, fiche complète (lien, fiabilité, « pourquoi : actualité majeure »), catégorie `sciences`, détection des titres trompeurs, vue « Journal », outils `news_briefing` et `news_more` | tests de composition (quotas, doublons, liens, aucune invention) ; essai réel d'une semaine avec de vrais flux |
+| P1 (fait, 3 nov. ; essai réel en cours dans V3) | Briefing sans données personnelles : rubriques, fiche complète (lien, fiabilité, « pourquoi : actualité majeure »), catégorie `sciences`, détection des titres trompeurs, vue « Journal », outils `news_briefing` et `news_more` | tests de composition (quotas, doublons, liens, aucune invention) ; essai réel d'une semaine avec de vrais flux |
 | P2 | Stockage personnel chiffré (`orion/knowledge/personal_store.py`) et importeur Takeout (JSON « Mon activité » et YouTube), minimisation, suppression de l'archive | tests sur archives fictives ; aucune donnée personnelle dans la base publique ni dans les journaux |
 | P3 | Moteur d'intérêts : extraction, durabilité, tendance, filtre des catégories sensibles, états proposé et confirmé, vue « Mes intérêts » (consulter, corriger, supprimer, tout effacer) | tests de règles (ponctuel ou durable, sensibles jamais créés, suppression en cascade) |
 | P4 | Pertinence personnelle et apprentissage par interactions dans le journal | tests de classement ; une « actualité majeure » jamais écartée ; corrections prises en compte |

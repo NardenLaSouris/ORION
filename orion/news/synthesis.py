@@ -16,7 +16,7 @@ from orion.news.pipeline import Article, Story, numbers
 from orion.platform.intelligence import StructuredLLM
 
 CATEGORY_LABELS = {"geopolitique": "Géopolitique", "defense": "Défense", "tech_ia": "Technologie et IA",
-                   "france": "France", "economie": "Économie"}
+                   "france": "France", "economie": "Économie", "sciences": "Sciences"}
 SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["summary", "confirmed", "uncertain"],
     "properties": {

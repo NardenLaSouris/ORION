@@ -64,6 +64,14 @@ MIGRATIONS = (
     """),
     # Sujets du bulletin, structurés pour la mise en page (orion/news/page.py).
     Migration(2, "ALTER TABLE news_bulletins ADD COLUMN entries TEXT NOT NULL DEFAULT '[]'"),
+    # Journal quotidien (lot P1) : fiches numérotées, version dite, raisons des exclusions, remise.
+    Migration(3, """
+        CREATE TABLE news_journals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, day TEXT NOT NULL, items TEXT NOT NULL,
+            spoken TEXT NOT NULL, excluded TEXT NOT NULL, delivered TEXT NOT NULL
+        );
+        CREATE INDEX news_journals_day ON news_journals (day)
+    """),
 )
 PAGE_STALE = 6 * 3600  # bulletin plus ancien : un nouveau est composé (aperçu, jamais compté comme envoyé)
 
@@ -87,6 +95,8 @@ class NewsSettings:
     alerts_enabled: bool = True
     bulletins_enabled: bool = True
     collect_minutes: float = 30.0
+    journal_time: str = "07:30"  # journal quotidien (lot P1)
+    journal_enabled: bool = True
 
 
 def _time(text: Any) -> str:
@@ -127,7 +137,9 @@ class NewsEngine(BaseModule):
                             dict(d.weights), int(saved.get("max_calls_per_day", d.max_calls_per_day)),
                             float(saved.get("min_call_interval_minutes", d.min_call_interval_minutes)),
                             bool(saved.get("alerts_enabled", d.alerts_enabled)),
-                            bool(saved.get("bulletins_enabled", d.bulletins_enabled)), d.collect_minutes)
+                            bool(saved.get("bulletins_enabled", d.bulletins_enabled)), d.collect_minutes,
+                            str(saved.get("journal_time", d.journal_time)),
+                            bool(saved.get("journal_enabled", d.journal_enabled)))
 
     def update_settings(self, data: dict) -> dict:
         if not isinstance(data, dict):
@@ -160,7 +172,9 @@ class NewsEngine(BaseModule):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 5 <= value <= 1440:
                 raise ValueError("intervalle entre deux appels : de 5 à 1440 minutes")
             clean["min_call_interval_minutes"] = float(value)
-        for flag in ("alerts_enabled", "bulletins_enabled"):
+        if "journal_time" in data:
+            clean["journal_time"] = _time(data["journal_time"])
+        for flag in ("alerts_enabled", "bulletins_enabled", "journal_enabled"):
             if flag in data:
                 if not isinstance(data[flag], bool):
                     raise ValueError(f"{flag} : vrai ou faux")
@@ -187,10 +201,12 @@ class NewsEngine(BaseModule):
         self._restore_calls()
         self._scheduler.add("news:collect", self.settings.collect_minutes * 60, self.collect)
         self._scheduler.add("news:bulletins", 60, self.bulletin_due)
+        self._scheduler.add("news:journal", 60, self.journal_due)
 
     def stop(self) -> None:
         self._scheduler.remove("news:collect")
         self._scheduler.remove("news:bulletins")
+        self._scheduler.remove("news:journal")
 
     # --- Collecte et traitement ------------------------------------------------------------------------------
 
@@ -438,6 +454,85 @@ class NewsEngine(BaseModule):
             latest = self.latest_bulletin()
         return latest, render_html(latest)
 
+    # --- Journal quotidien (lot P1) ---------------------------------------------------------------------------
+
+    def journal_due(self) -> int | None:
+        """Appelé chaque minute : le journal du jour à l'heure réglée (rattrapé moins de 2 h après, jamais en double)."""
+        s = self.settings
+        if not s.journal_enabled:
+            return None
+        now = self._now()
+        hours, minutes = map(int, s.journal_time.split(":"))
+        at = now.replace(hour=hours, minute=minutes, second=0, microsecond=0)
+        if not at <= now < at + timedelta(hours=2):
+            return None
+        if self._store.one("SELECT 1 FROM news_journals WHERE day = ?", (now.strftime("%Y-%m-%d"),)):
+            return None
+        return self.journal(deliver=True)
+
+    def journal(self, deliver: bool = False, origin: str = "delegated:news:journal") -> int:
+        """Compose le journal (``deliver`` : remis par le routeur d'alertes et compté ; sinon aperçu)."""
+        from orion.news import briefing as br
+
+        now = self._clock()
+        previous = self.latest_journal(delivered_only=True)
+        since = max(previous["at"] if previous else 0.0, now - 86400)
+        s = self.settings
+        floor = {**pl.THRESHOLDS, **s.thresholds}["bulletin"]
+        rows = self._store.query("SELECT data FROM news_stories WHERE updated_at > ? ORDER BY score DESC LIMIT 200",
+                                 (since,))
+        stories = [pl.Story.from_dict(loads(r["data"], {})) for r in rows]
+        chosen = br.plan(stories, self._articles, floor=floor, categories=set(s.categories),
+                         previous=set(previous["stories"]) if previous else set())
+        items = [br.card(i, pick, summarize(pick.story, pick.articles, self._llm))
+                 for i, pick in enumerate(chosen.picks, 1)]
+        when = "du " + datetime.fromtimestamp(now).strftime("%d/%m")
+        text = br.spoken(items, when)
+        delivered: Any = "aperçu"
+        if deliver:
+            delivered = []
+            if self._alerts is not None:
+                d = self._alerts.deliver(Alert("news", f"Journal {when}", text, Level.NORMAL,
+                                               key=f"journal:{datetime.fromtimestamp(now):%Y-%m-%d}",
+                                               call_allowed=False, origin=origin))
+                delivered = list(d.channels)
+            for pick in chosen.picks:
+                pick.story.journal_facts = set(pick.story.facts)
+                self._save(pick.story)
+        journal_id = self._store.write(
+            "INSERT INTO news_journals (at, day, items, spoken, excluded, delivered) VALUES (?, ?, ?, ?, ?, ?)",
+            (now, datetime.fromtimestamp(now).strftime("%Y-%m-%d") if deliver else "", dumps(items), text,
+             dumps(chosen.excluded), dumps(delivered)))
+        if deliver:
+            self._history.record("news", f"journal:{journal_id}", "journal", {"informations": len(items),
+                                                                             "écartées": len(chosen.excluded),
+                                                                             "canaux": delivered})
+        return journal_id
+
+    def latest_journal(self, delivered_only: bool = False) -> dict | None:
+        where = " WHERE day != ''" if delivered_only else ""
+        row = self._store.one(f"SELECT * FROM news_journals{where} ORDER BY at DESC, id DESC LIMIT 1")
+        return self._journal_row(row) if row else None
+
+    @staticmethod
+    def _journal_row(row: dict) -> dict:
+        items = loads(row["items"], [])
+        return {**row, "items": items, "stories": [i["story"] for i in items],
+                "excluded": loads(row["excluded"], {}), "delivered": loads(row["delivered"], [])}
+
+    def current_journal(self) -> dict:
+        """Journal le plus récent s'il a moins de 6 h, sinon un aperçu composé maintenant (jamais compté envoyé)."""
+        latest = self.latest_journal()
+        if latest is None or self._clock() - latest["at"] > PAGE_STALE:
+            self.journal(deliver=False)
+            latest = self.latest_journal()
+        return latest
+
+    def journal_page(self) -> str:
+        from orion.news.page import render_journal
+
+        return render_journal(self.current_journal())
+
     # --- Lecture ---------------------------------------------------------------------------------------------
 
     def stories(self, category: str | None = None, limit: int = 50) -> list[dict]:
@@ -500,6 +595,17 @@ class NewsEngine(BaseModule):
             if parts == ["bulletins", "page"] and method == "GET":
                 bulletin, html = self.page(fresh=False) if self.latest_bulletin() else self.page()
                 return 200, {"id": bulletin["id"], "at": bulletin["at"], "html": html}
+            if parts == ["journals"]:
+                if method == "GET":
+                    rows = self._store.query("SELECT * FROM news_journals ORDER BY at DESC, id DESC LIMIT 30")
+                    return 200, [self._journal_row(r) for r in rows]
+                if method == "POST":  # aperçu : composé et gardé, jamais envoyé
+                    journal_id = self.journal(deliver=False)
+                    return 201, self._journal_row(self._store.one("SELECT * FROM news_journals WHERE id = ?",
+                                                                  (journal_id,)))
+            if parts == ["journals", "page"] and method == "GET":
+                journal = self.current_journal()
+                return 200, {"id": journal["id"], "at": journal["at"], "html": self.journal_page()}
             if parts == ["alerts"] and method == "GET":
                 return 200, self._alerts.history(100, "news") if self._alerts is not None else []
             if parts == ["collect"] and method == "POST":

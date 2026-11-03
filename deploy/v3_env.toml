@@ -141,6 +141,43 @@ url = "https://www.lemonde.fr/economie/rss_full.xml"
 category = "economie"
 reliability = "media"
 
+# Sciences (rubrique « Technologie et sciences » du journal) et sources supplémentaires pour les confirmations
+# croisées ; flux vérifiés le 3 novembre 2026 (Numerama 403, Les Échos 503 : écartés).
+[news.feeds.lemonde_sciences]
+url = "https://www.lemonde.fr/sciences/rss_full.xml"
+category = "sciences"
+reliability = "media"
+
+[news.feeds.franceinfo_sciences]
+url = "https://www.francetvinfo.fr/sciences.rss"
+category = "sciences"
+reliability = "media"
+
+[news.feeds.sciencesetavenir]
+url = "https://www.sciencesetavenir.fr/rss.xml"
+category = "sciences"
+reliability = "media"
+
+[news.feeds.esa_france]
+url = "https://www.esa.int/rssfeed/France"
+category = "sciences"
+reliability = "official"
+
+[news.feeds.franceinfo_monde]
+url = "https://www.francetvinfo.fr/monde.rss"
+category = "geopolitique"
+reliability = "media"
+
+[news.feeds.franceinfo_economie]
+url = "https://www.francetvinfo.fr/economie.rss"
+category = "economie"
+reliability = "media"
+
+[news.feeds.franceinfo_politique]
+url = "https://www.francetvinfo.fr/politique.rss"
+category = "france"
+reliability = "media"
+
 [evolve]
 enabled = true
 

@@ -432,7 +432,9 @@ class WatchConfig:
 class NewsConfig:
     enabled: bool = False
     bulletin_times: tuple = ("08:00", "20:00")
-    categories: tuple = ("geopolitique", "defense", "tech_ia", "france", "economie")
+    categories: tuple = ("geopolitique", "defense", "tech_ia", "france", "economie", "sciences")
+    journal_time: str = "07:30"  # journal quotidien sans données personnelles (lot P1)
+    journal_enabled: bool = True
     # Flux : nom -> {"url": "...", "category": "...", "reliability": "official" | "agency" | "media" | "blog"}.
     feeds: dict = field(default_factory=dict)
     collect_minutes: float = 30.0

@@ -570,6 +570,8 @@
       const interval = el("input", { type: "number", min: 5, max: 1440, value: settings.min_call_interval_minutes, style: "width:6em" });
       const alertsOn = el("input", { type: "checkbox", checked: settings.alerts_enabled });
       const bulletinsOn = el("input", { type: "checkbox", checked: settings.bulletins_enabled });
+      const journalTime = el("input", { type: "text", value: settings.journal_time || "07:30", style: "width:5em" });
+      const journalOn = el("input", { type: "checkbox", checked: settings.journal_enabled !== false });
       const cats = Object.entries(settings.category_labels).map(([k, label]) =>
         [k, el("input", { type: "checkbox", checked: settings.categories.includes(k) }), label]);
       const save = () => act(mod("news", "/settings", "PUT", {
@@ -577,18 +579,22 @@
         thresholds: Object.fromEntries(Object.entries(thresholds).map(([k, i]) => [k, Number(i.value)])),
         max_calls_per_day: Number(calls.value), min_call_interval_minutes: Number(interval.value),
         alerts_enabled: alertsOn.checked, bulletins_enabled: bulletinsOn.checked,
+        journal_time: journalTime.value.trim(), journal_enabled: journalOn.checked,
         categories: cats.filter(([, box]) => box.checked).map(([k]) => k),
       }), "Réglages enregistrés.").then(refresh);
       const latest = bulletins[0];
       let page = null;
       try { page = await mod("news", "/bulletins/page"); } catch (error) { page = null; }
+      let journal = null;
+      try { journal = await mod("news", "/journals/page"); } catch (error) { journal = null; }
       view.replaceChildren(
         el("h1", {}, "Actualités"),
         cards([["Sources", status.sources], ["Événements (48 h)", status["événements_48h"]],
           ["Dernier bulletin", stamp(status.dernier_bulletin)], ["Appels (24 h)", status.appels_24h],
           ["Synthèse LLM", status.llm ? "disponible" : "mode dégradé"]]),
         el("div", { class: "toolbar" }, button("Collecter maintenant", () => act(mod("news", "/collect", "POST"), "Collecte faite.").then(refresh)),
-          button("Aperçu du bulletin", () => act(mod("news", "/bulletins", "POST"), "Aperçu composé (non envoyé).").then(refresh))),
+          button("Aperçu du bulletin", () => act(mod("news", "/bulletins", "POST"), "Aperçu composé (non envoyé).").then(refresh)),
+          button("Aperçu du journal", () => act(mod("news", "/journals", "POST"), "Journal composé (non envoyé).").then(refresh))),
         el("h2", {}, "Réglages"),
         el("div", { class: "list" },
           el("label", { class: "row" }, "Heures des bulletins ", times),
@@ -597,7 +603,12 @@
           el("div", { class: "row" }, "Catégories : ", cats.map(([, box, label]) => el("label", {}, box, ` ${label} `))),
           el("div", { class: "row" }, el("label", {}, "Appels par jour ", calls), el("label", {}, " · écart (min) ", interval),
             el("label", {}, alertsOn, " alertes"), el("label", {}, bulletinsOn, " bulletins")),
+          el("div", { class: "row" }, el("label", {}, journalOn, " journal quotidien à "), journalTime),
           button("Enregistrer", save, "primary")),
+        el("h2", {}, "Journal"),
+        journal ? el("iframe", { srcdoc: journal.html, sandbox: "allow-popups allow-popups-to-escape-sandbox", title: "Journal",
+          style: "width:100%;height:720px;border:1px solid var(--line, #333);border-radius:8px;background:#f4f6fa" })
+          : el("div", { class: "empty" }, "Journal indisponible."),
         el("h2", {}, "Dernier bulletin"),
         page ? el("iframe", { srcdoc: page.html, sandbox: "allow-popups allow-popups-to-escape-sandbox", title: "Dernier bulletin",
           style: "width:100%;height:640px;border:1px solid var(--line, #333);border-radius:8px;background:#f4f6fa" })

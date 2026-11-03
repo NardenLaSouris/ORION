@@ -1207,6 +1207,7 @@ def build_agent(
         news = v3.registry.get("news") if v3 is not None else None
         if wallpaper is not None and news is not None:
             wallpaper.pages["/bulletin"] = lambda: news.page()[1]  # bulletin mis en page, PC et Katana seulement
+            wallpaper.pages["/journal"] = news.journal_page  # journal quotidien (lot P1)
     if call_rules is not None and calls is not None and (timers is not None or calendar is not None):
         from orion.scheduling.eve import EveWatch
 

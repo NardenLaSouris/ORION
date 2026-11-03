@@ -131,6 +131,7 @@ class Story:
     alerted_score: int = 0  # score lors de la dernière alerte (0 : jamais)
     alerted_status: str = ""
     bulletin_facts: set[str] = field(default_factory=set)  # ce que le dernier bulletin a dit
+    journal_facts: set[str] = field(default_factory=set)  # ce que le dernier journal a dit (lot P1)
 
     def as_dict(self) -> dict:
         return {"id": self.id, "category": self.category, "title": self.title, "tokens": sorted(self.tokens),
@@ -139,11 +140,12 @@ class Story:
                 "domains": self.domains, "facts": sorted(self.facts), "communicated_facts":
                 sorted(self.communicated_facts), "status": self.status, "score": self.score, "tier": self.tier,
                 "components": self.components, "development": self.development, "alerted_score": self.alerted_score,
-                "alerted_status": self.alerted_status, "bulletin_facts": sorted(self.bulletin_facts)}
+                "alerted_status": self.alerted_status, "bulletin_facts": sorted(self.bulletin_facts),
+                "journal_facts": sorted(self.journal_facts)}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Story":
-        sets = ("tokens", "facts", "communicated_facts", "bulletin_facts", "names")
+        sets = ("tokens", "facts", "communicated_facts", "bulletin_facts", "journal_facts", "names")
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: (set(v) if k in sets else v) for k, v in d.items() if k in known})
 

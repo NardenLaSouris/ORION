@@ -410,7 +410,7 @@ def test_the_scheduler_holds_module_jobs_while_suspended_and_runs_programmed_one
 
 # --- NEWS : bulletin programmé et initiative spontanée -------------------------------------------------------
 
-def news_world(foundation, home=True):
+def news_world(foundation, home=True, journal=False):
     from orion.news import NewsEngine, NewsSettings
     from tests.test_news import FEEDS, START, Channels, Clock as NewsClock, Web
 
@@ -423,8 +423,8 @@ def news_world(foundation, home=True):
     permits = foundation.permissions
     scheduler = Scheduler(clock, halted=lambda: permits.suspended_for("delegated:scheduler"), classify=classify_job,
                           blocked=permits.blocked)
-    engine = NewsEngine(store, FEEDS, alerts=alerts, scheduler=scheduler, settings=NewsSettings(), fetcher=web,
-                        clock=clock)
+    engine = NewsEngine(store, FEEDS, alerts=alerts, scheduler=scheduler, settings=NewsSettings(
+        journal_enabled=journal), fetcher=web, clock=clock)  # journal : testé à part (lot P1)
     engine.start()
     return SimpleNamespace(clock=clock, web=web, channels=channels, alerts=alerts, scheduler=scheduler,
                            engine=engine)
@@ -456,6 +456,24 @@ def test_a_scheduled_news_bulletin_runs_while_suspended_but_a_spontaneous_alert_
     principals = {(e["principal"], e["decision"]) for e in foundation.ledger.list(100)
                   if e["action"] == "alert:news"}
     assert ("delegated:news:bulletins", "allow") in principals and ("module:news", "deny") in principals
+
+
+def test_the_daily_journal_is_a_task_you_set_so_it_runs_while_suspended_and_stops_on_emergency():
+    foundation = Foundation(Store())
+    n = news_world(foundation, journal=True)
+    publish_grave(n)
+    n.scheduler.tick()
+    n.clock.t += 3600 + 60  # 8 h 01 : journal de 07:30 rattrapé, bulletin de 8 h
+    assert "news:journal" in n.scheduler.tick()
+    journal = [a for a in n.alerts.history(20, "news") if a["title"].startswith("Journal")][0]
+    assert journal["status"] == "envoyée"
+    assert ("delegated:news:journal", "allow") in {(e["principal"], e["decision"]) for e in foundation.ledger.list(200)
+                                                   if e["action"] == "alert:news"}
+    other_foundation = Foundation(Store())
+    other = news_world(other_foundation, journal=True)
+    other_foundation.autonomy.emergency_stop(VOICE)
+    other.clock.t += 3600 + 60
+    assert other.scheduler.tick() == [] and other.channels.sent == []
 
 
 def test_emergency_stop_also_stops_scheduled_news_bulletins():
@@ -512,6 +530,7 @@ def test_a_spontaneous_news_alert_raised_during_a_scheduled_bulletin_stays_an_in
     n.engine.bulletin = bulletin_that_also_collects
     n.clock.t += 3600 + 60  # 8 h 01
     n.scheduler.remove("news:collect")
+    n.scheduler.remove("news:journal")  # journal désactivé ici ; testé à part
     assert n.scheduler.tick() == ["news:bulletins"]
     history = {a["title"].split(" :")[0]: a["status"] for a in n.alerts.history(20, "news")}
     assert history["Alerte"] == "bloquée" and any(k.startswith("Bulletin") for k in history)

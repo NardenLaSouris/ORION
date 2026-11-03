@@ -203,6 +203,9 @@ def planner_prompt(registry: ToolRegistry) -> str:
                      "confirmer un achat à la voix : none (ORION Control seulement).")
     if registry.exists("news_bulletin"):
         rules.append("- « Quelles sont les actualités / les infos / les nouvelles ? », « le bulletin » : news_bulletin.")
+    if registry.exists("news_briefing"):
+        rules.append("- « Le journal », « les nouvelles du jour », « mon journal » : news_briefing. « Approfondis / "
+                     "détaille la deuxième », « parle-moi de l'info sur… » : news_more (numero, ou sujet).")
     if registry.exists("create_watch"):
         rules.append("- « Surveille… », « préviens-moi quand » un prix baisse, un produit revient en stock, un événement "
                      "de jeu ou une annonce officielle sort : create_watch (information extérieure), jamais "
@@ -400,6 +403,9 @@ DOMAIN_WORDS = {
     "stop_purchases": ("achat", "achats", "commande", "commandes", "acheter"),
     "news_bulletin": ("actualite", "actualites", "actu", "actus", "infos", "informations", "nouvelles", "bulletin",
                       "journal", "news"),
+    "news_briefing": ("journal", "nouvelles du jour", "actualite", "actualites", "infos", "news"),
+    "news_more": ("approfondis", "approfondir", "detaille", "details", "parle moi", "premiere", "deuxieme",
+                  "troisieme", "quatrieme", "cinquieme", "info", "information", "numero"),
     # WATCH (V3) : une information extérieure à surveiller.
     "create_watch": ("surveille", "surveiller", "surveillez", "surveillance", "previens moi", "prix", "disponible",
                      "en stock", "bonne affaire", "annonce", "sortie", "pokemon"),

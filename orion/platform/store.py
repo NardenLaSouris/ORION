@@ -34,6 +34,7 @@ DATA_CLASSES = {
     "tasks": OPERATIONAL, "events": OPERATIONAL,
     "history": PUBLIC, "alerts": PUBLIC, "news": PUBLIC, "price_history": PUBLIC, "event_calendar": PUBLIC,
     "watch": PUBLIC, "evolve": PUBLIC, "purchase": PUBLIC,
+    "fragfactory": PUBLIC,  # identifiants de clips et métadonnées courtes ; vidéos et analyses restent chez Frag Factory
     "personal": PERSONAL,
 }
 

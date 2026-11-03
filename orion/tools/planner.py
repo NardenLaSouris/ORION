@@ -207,6 +207,19 @@ def planner_prompt(registry: ToolRegistry) -> str:
         rules.append("- « Le journal », « les nouvelles du jour », « mon journal » : news_briefing. « Approfondis / "
                      "détaille la deuxième », « parle-moi de l'info sur… » : news_more (sujet seulement si la demande nomme un "
                      "sujet ; le numéro est lu dans la demande).")
+    if registry.exists("fragfactory_status"):
+        rules.append("- Frag Factory (clips CS2) : état -> fragfactory_status ; « quels clips / mes meilleurs clips / "
+                     "retrouve le clip… » -> fragfactory_list_clips ; « qu'est-ce qui attend ma validation », « combien "
+                     "de clips en attente » -> fragfactory_list_pending_reviews ; un clip précis (« le dernier clip », "
+                     "« le deuxième », « le clip du teamkill ») -> fragfactory_get_clip ; « montre-le / fais-moi revoir » "
+                     "-> fragfactory_play_clip ; statistiques -> fragfactory_get_statistics ; « le bilan de la nuit » -> "
+                     "fragfactory_get_nightly_report ; analyses récentes -> fragfactory_get_analysis_history ; « quel "
+                     "style de montage / pourquoi ce clip / quels effets » -> fragfactory_analyze_clip_style ; « quel "
+                     "montage tu ferais / propose un style » -> fragfactory_recommend_editing_style (propose seulement) ; "
+                     "« valide / accepte » -> fragfactory_approve_clip ; « refuse / rejette » -> fragfactory_reject_clip ; "
+                     "« il manque… / retouche » -> fragfactory_request_revision ; « produis / applique la version N » -> "
+                     "fragfactory_request_render. Le clip n'est jamais un paramètre : il est lu dans la demande. Publier "
+                     "un clip à la voix : none.")
     if registry.exists("create_watch"):
         rules.append("- « Surveille… », « préviens-moi quand » un prix baisse, un produit revient en stock, un événement "
                      "de jeu ou une annonce officielle sort : create_watch (information extérieure), jamais "
@@ -407,6 +420,23 @@ DOMAIN_WORDS = {
     "news_briefing": ("journal", "nouvelles du jour", "actualite", "actualites", "infos", "news"),
     "news_more": ("approfondis", "approfondir", "detaille", "details", "parle moi", "premiere", "deuxieme",
                   "troisieme", "quatrieme", "cinquieme", "info", "information", "numero"),
+    # Frag Factory (V3) : chaque outil exige un mot de son domaine dans la demande.
+    "fragfactory_status": ("frag factory", "fragfactory", "clips", "clip", "analyse", "analyses", "production"),
+    "fragfactory_list_clips": ("clip", "clips", "pepite", "pepites", "montage", "montages", "teamkill", "moment"),
+    "fragfactory_list_pending_reviews": ("attente", "attendent", "valider", "validation", "a trier"),
+    "fragfactory_get_clip": ("clip", "pepite", "montage", "video", "moment", "teamkill"),
+    "fragfactory_play_clip": ("montre", "revoir", "voir", "regarder", "visionner", "joue", "lance", "ouvre"),
+    "fragfactory_get_statistics": ("statistique", "statistiques", "stats", "combien", "chiffres"),
+    "fragfactory_get_nightly_report": ("bilan", "rapport", "compte rendu", "cette nuit", "nuit derniere"),
+    "fragfactory_get_analysis_history": ("analyse", "analyses", "analyse", "historique", "enregistrements"),
+    "fragfactory_analyze_clip_style": ("style", "montage", "effet", "effets", "pourquoi", "ressemble", "fonctionne"),
+    "fragfactory_recommend_editing_style": ("propose", "proposer", "conseille", "quel montage", "tu ferais",
+                                            "suggere", "nerveux", "humoristique", "version"),
+    "fragfactory_approve_clip": ("valide", "valider", "validez", "accepte", "accepter", "approuve", "garde"),
+    "fragfactory_reject_clip": ("refuse", "refuser", "rejette", "rejeter", "jette", "vire"),
+    "fragfactory_request_revision": ("manque", "retouche", "retravaille", "retravailler", "corrige", "refais"),
+    "fragfactory_request_render": ("produis", "produire", "applique", "appliquer", "genere", "rends", "fais la",
+                                   "lance la", "version"),
     # WATCH (V3) : une information extérieure à surveiller.
     "create_watch": ("surveille", "surveiller", "surveillez", "surveillance", "previens moi", "prix", "disponible",
                      "en stock", "bonne affaire", "annonce", "sortie", "pokemon"),
@@ -456,7 +486,10 @@ DEFERRED_TOOLS = ("create_reminder", "cancel_reminder", "cancel_all_reminders", 
 
 
 READ_ONLY_TOOLS = ("get_", "list_", "light_status", "find_", "read_", "recall", "search_", "next_", "free_",
-                   "system_info", "network_status", "spotify_status", "check_mail", "summarize_mail")
+                   "system_info", "network_status", "spotify_status", "check_mail", "summarize_mail",
+                   # Frag Factory : lecture et conseil (une question ne déclenche jamais une validation ni un rendu)
+                   "fragfactory_status", "fragfactory_list_", "fragfactory_get_", "fragfactory_play_clip",
+                   "fragfactory_analyze_clip_style", "fragfactory_recommend_editing_style")
 QUESTION = re.compile(r"^(?:jarvis )?(?:est ce que|est ce qu|est il|est elle|y a t il|qu est ce qui|quel|quelle|quels|"
                       r"quelles|combien|pourquoi|comment|ou est|quand)\b")
 REQUEST = re.compile(r"\b(?:tu peux|peux tu|tu pourrais|pourrais tu|vous pouvez|pouvez vous|vous pourriez|"

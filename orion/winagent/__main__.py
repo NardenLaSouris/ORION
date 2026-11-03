@@ -53,7 +53,16 @@ def main(argv: list[str] | None = None) -> int:
         config = load_agent_config(args.config, args.env)
     except (OSError, ValueError) as exc:
         return fail(f"Configuration de l'agent invalide : {exc}", 2)
-    server = AgentServer(config, pc_actions(config.tools))
+    actions = pc_actions(config.tools)
+    try:
+        from orion.fragfactory.agent_action import build_from_agent_config
+
+        ff = build_from_agent_config(config)  # [fragfactory] : relais vers Frag Factory (inactif par défaut)
+    except ValueError as exc:
+        return fail(f"Configuration [fragfactory] invalide : {exc}", 2)
+    if ff is not None:
+        actions.register(ff)
+    server = AgentServer(config, actions)
     try:
         server.start()
     except OSError as exc:

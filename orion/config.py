@@ -475,6 +475,26 @@ class PurchaseConfig:
 
 
 @dataclass(frozen=True)
+class FragFactoryConfig:
+    """Frag Factory (production de clips CS2 sur le PC fixe), supervisé par ORION. Inactif par défaut.
+
+    ORION l'atteint par l'agent Windows du PC (action « fragfactory », [fragfactory] de windows_agent.toml) : aucun
+    port de Frag Factory n'est ouvert sur le réseau. Les réglages modifiables (heure du rapport, canaux…) sont
+    ensuite gardés en base et réglés depuis ORION Control.
+    """
+    enabled: bool = False
+    device: str = ""  # appareil de [tools.devices] qui héberge Frag Factory ; vide : l'appareil par défaut
+    poll_seconds: float = 30.0
+    report_time: str = "08:00"
+    timezone: str = "Europe/Paris"
+    report_enabled: bool = True
+    voice_enabled: bool = True
+    written_enabled: bool = True
+    notify_tiers: tuple = ("pepite", "bon")
+    timeout: float = 20.0
+
+
+@dataclass(frozen=True)
 class Config:
     assistant: AssistantConfig
     wake_word: WakeWordConfig
@@ -506,6 +526,7 @@ class Config:
     news: NewsConfig = NewsConfig()
     evolve: EvolveConfig = EvolveConfig()
     purchase: PurchaseConfig = PurchaseConfig()
+    fragfactory: FragFactoryConfig = FragFactoryConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -637,6 +658,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "news": NewsConfig,
         "evolve": EvolveConfig,
         "purchase": PurchaseConfig,
+        "fragfactory": FragFactoryConfig,
     }
     tables = {key: raw.pop(key, {}) for key in ("users", "terminals")}
     unknown = set(raw) - set(sections)

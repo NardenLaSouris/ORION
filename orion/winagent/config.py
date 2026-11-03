@@ -22,6 +22,9 @@ class AgentConfig:
     output_device: str = ""
     face_port: int | None = None
     tools: dict = field(default_factory=dict)
+    # Frag Factory sur ce PC (section [fragfactory], inactive par défaut) ; jeton de liaison dans le .env.
+    fragfactory: dict = field(default_factory=dict)
+    fragfactory_token: str = field(default="", repr=False)
 
 
 def load_agent_config(path: str | Path, env_file: str | Path) -> AgentConfig:
@@ -32,8 +35,10 @@ def load_agent_config(path: str | Path, env_file: str | Path) -> AgentConfig:
     path = Path(path)
     data = read_with_local(path)
     raw, audio, face = data.get("agent", {}), data.get("audio", {}), data.get("face", {})
-    unknown = (set(data) - {"agent", "audio", "face", "tools"}) | (set(raw) - {"host", "port", "allowed_ips"}) | (
-        set(audio) - {"input_device", "output_device"}) | (set(face) - {"open_on_connect", "port"})
+    ff = data.get("fragfactory", {})
+    unknown = (set(data) - {"agent", "audio", "face", "tools", "fragfactory"}) | (
+        set(raw) - {"host", "port", "allowed_ips"}) | (set(audio) - {"input_device", "output_device"}) | (
+        set(face) - {"open_on_connect", "port"}) | (set(ff) - {"enabled", "url", "allow_lan", "timeout"})
     if unknown:
         raise ValueError(f"Réglages inconnus dans {path.name} : {sorted(unknown)}")
     port = _port(raw.get("port", 8765))
@@ -49,9 +54,17 @@ def load_agent_config(path: str | Path, env_file: str | Path) -> AgentConfig:
     if len(token) < MIN_TOKEN_LENGTH:
         raise ValueError(f"{TOKEN_NAME} absent ou trop court ({MIN_TOKEN_LENGTH} caractères minimum) : "
                          f"définissez-le dans l'environnement ou dans {Path(env_file).name}.")
+    ff_token = ""
+    if ff.get("enabled", False):
+        from orion.fragfactory.link import MIN_TOKEN, TOKEN_ENV
+
+        ff_token = secret(TOKEN_ENV, Path(env_file))
+        if len(ff_token) < MIN_TOKEN:
+            raise ValueError(f"[fragfactory] activé mais {TOKEN_ENV} absent ou trop court ({MIN_TOKEN} caractères "
+                             f"minimum) : définissez-le dans l'environnement ou dans {Path(env_file).name}.")
     return AgentConfig(str(raw.get("host", "0.0.0.0")), port, allowed, token,
                        str(audio.get("input_device", "")), str(audio.get("output_device", "")), face_port,
-                       data.get("tools", {}))
+                       data.get("tools", {}), dict(ff), ff_token)
 
 
 def _port(value) -> int:

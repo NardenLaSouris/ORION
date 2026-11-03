@@ -85,6 +85,9 @@ class NotificationsModule(BaseModule):
 JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.value),
                "news:journal": ("delegated:news:journal", Capability.NOTIFY.value),
                "news:collect": ("module:news", Capability.READ.value),
+               # Frag Factory : notifications de clips et rapport du matin, que vous avez activés vous-même.
+               "fragfactory:sync": ("delegated:fragfactory:notifications", Capability.NOTIFY.value),
+               "fragfactory:report": ("delegated:fragfactory:report", Capability.NOTIFY.value),
                "evolve:scan": ("module:evolve", Capability.READ.value)}
 
 
@@ -107,7 +110,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
              foundation=None) -> V3Modules | None:
     """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
     planificateur s'arrête net sur arrêt d'urgence."""
-    wanted = [name for name in ("watch", "news", "evolve", "purchase") if getattr(cfg, name).enabled]
+    wanted = [name for name in ("watch", "news", "evolve", "purchase", "fragfactory")
+              if getattr(cfg, name).enabled]
     if not wanted:
         return None
     m = cfg.modules
@@ -218,6 +222,13 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                   gate=permits.gate("delegated:purchase") if permits else None)
         registry.register(purchase)
         tools += purchase_tools(purchase)
+    if "fragfactory" in wanted:
+        from orion.fragfactory import build_module
+        from orion.fragfactory.tools import fragfactory_tools
+
+        fragfactory = build_module(cfg, store, alerts=alerts, scheduler=scheduler, history=history)
+        registry.register(fragfactory)
+        tools += fragfactory_tools(fragfactory)
     modules = V3Modules(store, scheduler, alerts, registry, tools)
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)
     return modules

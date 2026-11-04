@@ -50,6 +50,8 @@ unique et la relance après plantage (superviseur) sont conservés. Journal : `d
 | 10:53 | Retrait de l'agent V2 et de l'ancien ORION Control (`pc_install.ps1 -RetireV2`) | un seul agent (8875), plus rien sur 8765 ; raccourcis V2 et V3 anciens mis de côté dans `.orion\raccourcis-retires` |
 | 10:55 | Core V3 actif : voix par l'agent V3, réveil « Hey Orion », voix fr_FR-orion-medium, outils du PC, visage ; ancienne configuration gardée (`config.local.toml.avant-reference-20261104-095508`) ; transformation : `deploy/v3_reference_config.py` | « En veille — dites « Hey Orion » » ; micro du PC diffusé vers le Core V3 |
 | 10:57 | Visage du Katana sur le visage V3 (`open_face.ps1`, ancienne version `.v2-20261104`) | Chrome en kiosque sur `http://192.168.1.91:8865/` |
+| 11:09 | `v3_reference_root.sh` lancé par vous : règles réseau installées, ressources du Core principal, Core V2 arrêté et désactivé | V2 `inactive` / `disabled`, `/opt/orion` intact |
+| 11:12 | Transcription du Katana : jeton propre à la V3 (sur votre accord ; ancien gardé : `token.txt.v2-20261104`) | « STT : GPU distant http://192.168.1.73:8766 » ; large-v3 sur CUDA, 401 sans jeton |
 | 11:00 | Copies de travail `orion-v3-agent` et `orion-fragfactory` retirées (propres, intégrées à `v3`, inutilisées ; branches gardées) | — |
 
 Refusé par le contrôle de sécurité automatique de la session (non contourné) : rotation du jeton de transcription du

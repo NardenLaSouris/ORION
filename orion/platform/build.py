@@ -274,7 +274,9 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                     decide=permits.decide if permits else None,
                                     ledger=foundation.ledger if foundation is not None else None,
                                     settings=DiscordSettings(d.poll_seconds,
-                                                             undeafen_keeps_mute=d.undeafen_keeps_mute))
+                                                             undeafen_keeps_mute=d.undeafen_keeps_mute,
+                                                             default_salon=d.default_salon,
+                                                             default_serveur=d.default_serveur))
             registry.register(discord)
             tools += discord_tools(discord)
             contexts["discord.deafened"] = discord.deafened

@@ -51,6 +51,8 @@ ACTION_CLAIMS = (
                r"modifiee?s?|changee?s?|passee?s?|tamisee?s?|configuree?s?|definie?s?)\b"),
     re.compile(r"\b(message|mail|e mail|sms|musique|lumiere) (est )?(bien )?(envoye|lancee?|allumee|eteinte)\b"),
     re.compile(r"\bje m en occupe\b"),
+    # « Tous, monsieur. Je vous ai mis en veille. » (message du 2 novembre 2026 : rien n'avait été fait)
+    re.compile(r"\bje vous ai (bien |deja )?(mise?|passee?|placee?|reveille|deconnectee?|connectee?)\b"),
     re.compile(r"\bj ai (bien )?(pris note|note|pris en compte|transmis)\b"),
     re.compile(r"\bje vous (rappellerai|recontacterai|previendrai|tiendrai (au courant|informe))\b"),
     re.compile(r"\bje (peux|pourrai|vais pouvoir) (vous )?(programmer|allumer|eteindre|envoyer|lancer|ouvrir|"

@@ -8,6 +8,7 @@ par durée / message, ou sans précision s'il n'y a qu'une seule échéance en c
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -80,6 +81,13 @@ def _identifier(value: str) -> str:
     return value
 
 
+def _identifiers(value: str) -> str:
+    ids = [v.strip() for v in str(value).split(",") if v.strip()]
+    if not ids or len(ids) > 20 or not all(ID.match(i) for i in ids):
+        raise ToolError(INVALID_PARAMETERS, "Numéros invalides.")
+    return ",".join(dict.fromkeys(ids))
+
+
 def _call(action: Callable[[], Scheduled]) -> Scheduled:
     try:
         return action()
@@ -92,7 +100,31 @@ def _duration_param(description: str, required: bool = True) -> Param:
 
 
 def _words(text: str) -> set[str]:
-    return set(normalize(text).split()) - COMMON_WORDS
+    """Mots porteurs, au singulier : « les noms de domaines » retrouve « renouveler mes noms de domaine » (message du
+    2 novembre 2026 : « Aucun rappel correspondant » alors que deux rappels existaient)."""
+    return {_singular(w) for w in normalize(text).split()} - COMMON_WORDS
+
+
+def _singular(word: str) -> str:
+    return word[:-1] if len(word) > 3 and word[-1] in "sx" and not word.endswith(("ss", "us")) else word
+
+
+SHOWN_SECONDS = 600.0  # « supprime le premier » vise la dernière liste montrée, pendant 10 minutes
+
+
+def _show(manager, ids: list[str], kind: str) -> None:
+    """Rappels que vous venez d'entendre, dans l'ordre (une liste, ou les candidats d'une question « lequel ? »)."""
+    manager.shown_reminders = {"at": time.monotonic(), "ids": list(ids), "kind": kind}
+
+
+def shown_reminders(manager) -> dict | None:
+    """Dernière liste montrée encore valable (récente, rappels toujours actifs), sinon None."""
+    shown = getattr(manager, "shown_reminders", None)
+    if not shown or time.monotonic() - shown["at"] > SHOWN_SECONDS:
+        return None
+    active = {r.id for r in manager.reminders()}
+    ids = [i for i in shown["ids"] if i in active]
+    return {**shown, "ids": ids} if ids else None
 
 
 def _pick(active: list, item_id: str | None, matches: Callable[[Scheduled], bool] | None, label: str,
@@ -202,18 +234,27 @@ def timer_tools(manager: TimerManager) -> list[Tool]:
     def cancel_reminder(reminder_id: str | None = None, message: str | None = None) -> dict:
         wanted = _words(message) if message else set()
         matches = (lambda r: bool(wanted) and wanted <= _words(r.message)) if message else None
-        chosen = _pick(manager.reminders(), reminder_id, matches, "rappel", REMINDER_NOT_FOUND,
-                       lambda r: f"n° {r.id} : {r.message}")
+        try:
+            chosen = _pick(manager.reminders(), reminder_id, matches, "rappel", REMINDER_NOT_FOUND,
+                           lambda r: f"n° {r.id} : {r.message}")
+        except ToolError as exc:
+            if exc.code == AMBIGUOUS:  # « Lequel ? » : la réponse (« le 3 », « tous ») vise ces candidats
+                _show(manager, [r.id for r in manager.reminders() if matches is None or matches(r)], "choice")
+            raise
         reminder = _call(lambda: manager.cancel_reminder(chosen))
         return {"reminder_id": reminder.id, "message": second_person(reminder.message), "cancelled": True}
 
-    def matching(message: str | None) -> list:
+    def matching(message: str | None, reminder_ids: str | None = None) -> list:
+        if reminder_ids:  # numéros précis (« supprime le 3 et le 4 », « supprime-les tous » après une liste)
+            wanted_ids = [i for i in reminder_ids.split(",") if i]
+            return [r for r in manager.reminders() if r.id in wanted_ids]
         wanted = _words(message) if message else set()
         return [r for r in manager.reminders() if not wanted or wanted <= _words(r.message)]
 
-    def cancel_all_reminders(message: str | None = None) -> dict:
-        """« Supprime tous mes rappels », « supprime les rappels Revolut » : après confirmation."""
-        chosen = matching(message)
+    def cancel_all_reminders(message: str | None = None, reminder_ids: str | None = None) -> dict:
+        """« Supprime tous mes rappels », « supprime les rappels Revolut », « supprime le 3 et le 4 » : après
+        confirmation."""
+        chosen = matching(message, reminder_ids)
         if not chosen:
             raise ToolError(REMINDER_NOT_FOUND,
                             "Aucun rappel ne correspond." if message else "Aucun rappel n'est prévu.")
@@ -226,7 +267,7 @@ def timer_tools(manager: TimerManager) -> list[Tool]:
         return {"count": len(cancelled), "reminder_ids": cancelled}
 
     def all_question(p: dict) -> str:
-        chosen = matching(p.get("message"))
+        chosen = matching(p.get("message"), p.get("reminder_ids"))
         if not chosen:
             return "Il n'y a aucun rappel à supprimer. Voulez-vous continuer ?"
         names = " ; ".join(second_person(r.message) for r in chosen[:3]) + (" ; …" if len(chosen) > 3 else "")
@@ -234,7 +275,9 @@ def timer_tools(manager: TimerManager) -> list[Tool]:
         return f"Voulez-vous vraiment supprimer {what} : {names} ?"
 
     def list_reminders() -> dict:
-        reminders = [_reminder_view(r, manager) for r in manager.reminders()]
+        active = manager.reminders()
+        _show(manager, [r.id for r in active], "list")
+        reminders = [_reminder_view(r, manager) for r in active]
         return {"count": len(reminders), "reminders": reminders}
 
     def postpone_reminder(reminder_id: str | None = None, message: str | None = None, delay: int | None = None,
@@ -309,7 +352,9 @@ def timer_tools(manager: TimerManager) -> list[Tool]:
         Tool("cancel_all_reminders", "Supprime tous les rappels prévus, ou tous ceux qui contiennent les mots dits "
              "(« les rappels Revolut »), après confirmation.",
              {"message": Param(str, "mots des rappels à supprimer, s'ils ont été dits", required=False,
-                               max_length=200)},
+                               max_length=200),
+              "reminder_ids": Param(str, "numéros des rappels à supprimer, séparés par des virgules", required=False,
+                                    max_length=60, hidden=True, check=_identifiers)},
              {"count": "nombre de rappels supprimés"}, Risk.CONFIRMATION_REQUIRED, cancel_all_reminders,
              question=all_question,
              say=lambda r: f"C'est fait, monsieur : {r['count']} rappel{'s' if r['count'] > 1 else ''} "

@@ -513,6 +513,8 @@ class DiscordConfig:
     poll_seconds: float = 5.0
     timeout: float = 6.0
     undeafen_keeps_mute: bool = True  # fin de sourdine : le micro reste coupé (démute explicite seulement)
+    default_salon: str = ""  # « connecte-moi en vocal » sans salon dit : ce salon (ex. « Général »)
+    default_serveur: str = ""  # … sur ce serveur (ex. « Et le Zombie avec ou sans »)
 
 
 @dataclass(frozen=True)

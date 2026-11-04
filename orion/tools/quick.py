@@ -194,6 +194,46 @@ def _duration_phrase(text: str, after: tuple[str, ...] = ()) -> tuple[str, int, 
     return " ".join(words[start:end]), start, best[1]
 
 
+FOLLOWUP = re.compile(r"(?:(?:et|non|oui|alors|bon|ok)\s+)?(?:(?P<verb>supprime|supprimes|supprimez|supprimer|"
+                      r"annule|annules|annulez|efface|effacez|enleve|enlevez|retire|retirez|vire)\s*)?"
+                      r"(?:aussi\s+|moi\s+)?(?P<target>.*?)(?:\s+aussi|\s+s il te plait|\s+stp|\s+merci)?")
+ORDINALS = {"premier": 0, "premiere": 0, "1er": 0, "deuxieme": 1, "second": 1, "seconde": 1, "troisieme": 2,
+            "quatrieme": 3, "cinquieme": 4, "sixieme": 5, "dernier": -1, "derniere": -1}
+NUMBER_WORDS = {"un": "1", "une": "1", "deux": "2", "trois": "3", "quatre": "4", "cinq": "5", "six": "6", "sept": "7",
+                "huit": "8", "neuf": "9", "dix": "10"}
+ALL_WORDS = {"tous", "tout", "toutes", "les tous", "tous les deux", "les deux", "tous les rappels", "tout ca",
+             "les rappels", "les", "les toutes", "tous ceux la", "tout le monde"}
+FILLER = {"le", "la", "l", "n", "numero", "no", "rappel", "celui", "et", "puis", "aussi", "avec"}
+
+
+def _followup_ids(target: str, shown: list[str]) -> list[str]:
+    """Rappels désignés dans une suite (numéros, ordinaux, « tous ») parmi ceux qui viennent d'être montrés ; [] si
+    la suite désigne autre chose (des mots : le message d'un rappel, décidé ailleurs)."""
+    target = " ".join(target.split())
+    if target in ALL_WORDS:  # « supprime » seul ne vise rien
+        return list(shown)
+    tokens = [NUMBER_WORDS.get(t, t) for t in target.split() if t not in FILLER]
+    if not tokens:
+        return []
+    picked: list[str] = []
+    for token in tokens:
+        if token in ORDINALS:
+            index = ORDINALS[token]
+            if not -len(shown) <= index < len(shown):
+                return []
+            picked.append(shown[index])
+        elif token.isdigit():
+            if token in shown:  # numéro de rappel dit par ORION (« n° 3 »)
+                picked.append(token)
+            elif 1 <= int(token) <= len(shown):  # rang dans la liste (« le 2 »)
+                picked.append(shown[int(token) - 1])
+            else:
+                return []
+        else:
+            return []  # un autre mot : pas une simple désignation
+    return list(dict.fromkeys(picked))
+
+
 class QuickPlanner:
     """Analyse déterministe ; ``registry`` donne les outils disponibles et leurs contrôles (applications autorisées,
     couleurs, pièces)."""
@@ -239,6 +279,9 @@ class QuickPlanner:
             return None
         if memory is not None:
             return {"type": "tool_call", "tool": memory[0], "parameters": memory[1]}
+        followup = self._reminder_followup(norm)  # « supprime le premier » après une liste de rappels
+        if followup is not None:
+            return {"type": "tool_call", "tool": followup[0], "parameters": followup[1]}
         parsers = (self._discord, self._media, self._calendar, self._routine, self._face, self._sound, self._lights, self._apps,
                    self._timer, self._reminder, self._alarm, self._weather, self._lock, self._power, self._spotify)
         # Un rappel ou un réveil d'abord : son message peut nommer n'importe quoi (« rappelle-moi demain d'appeler le
@@ -254,6 +297,25 @@ class QuickPlanner:
             if call is not None:
                 return {"type": "tool_call", "tool": call[0], "parameters": call[1]}
         return None
+
+    def _reminder_followup(self, norm):
+        """Suite d'une liste de rappels qu'ORION vient de dire (ou de sa question « Lequel dois-je annuler ? »), dans
+        les 10 minutes : « supprime le premier », « supprime aussi 4 », « 3 et 4 », « supprime-les tous », « tous ».
+        Messages du 2 novembre 2026 : « Supprime le premier » partait vers la suppression d'un FICHIER « premier »,
+        « Tous » mettait ORION en veille. Sans liste récente : rien (le reste du Core décide)."""
+        shown_of = self._registry.context.get("reminders.shown")
+        shown = shown_of() if callable(shown_of) else None
+        if not shown or not self._exists("cancel_reminder"):
+            return None
+        match = FOLLOWUP.fullmatch(norm)
+        if match is None or (not match.group("verb") and shown["kind"] != "choice"):
+            return None  # sans verbe (« tous », « 3 ») : seulement en réponse à « lequel ? »
+        ids = _followup_ids(match.group("target"), shown["ids"])
+        if not ids:
+            return None
+        if len(ids) == 1:
+            return "cancel_reminder", {"reminder_id": ids[0]}
+        return "cancel_all_reminders", {"reminder_ids": ",".join(ids)}
 
     def _memory(self, norm, text):
         """« Retiens que ... », « Que sais-tu de moi ? », « Oublie que ... » (avant les règles qui excluent « ne »)."""

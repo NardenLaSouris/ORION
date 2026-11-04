@@ -1111,6 +1111,11 @@ def build_agent(
                         light_tools_for(rooms, driver, cfg.lights.scenes, home), extra)
     if tools is not None and v3 is not None:
         tools.registry.context.update(v3.contexts)
+    if tools is not None and timers is not None:
+        from orion.tools.timers import shown_reminders
+
+        # « supprime le premier », « 3 et 4 », « tous » : la dernière liste de rappels dite (orion/tools/quick.py)
+        tools.registry.context["reminders.shown"] = lambda: shown_reminders(timers)
     if tools is not None and foundation is not None:
         tools.permissions = foundation.wrap(tools.permissions)  # le moteur central s'ajoute, sans rien remplacer
     if foundation is not None:

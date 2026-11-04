@@ -417,8 +417,9 @@ class FakeAgent:
             self.remote.update({k: v for k, v in parameters.items()})
             self.remote["mute"] = self.remote["mute"] or self.remote["deaf"]
         if action == "discord_join":
-            guild = next(g for g in self.guilds if any(c["id"] == parameters["channel_id"] for c in g["channels"]))
-            chan = next(c for c in guild["channels"] if c["id"] == parameters["channel_id"])
+            guild = next((g for g in self.guilds if any(c["id"] == parameters["channel_id"] for c in g["channels"])),
+                         {"id": "0", "name": "", "channels": [{"id": parameters["channel_id"], "name": "?"}]})
+            chan = next(c for c in guild["channels"] if c["id"] == parameters["channel_id"])  # hors liste : par id
             self.remote["voice"] = {"channel_id": chan["id"], "channel": chan["name"], "guild_id": guild["id"],
                                     "guild": guild["name"], "participants": [{"id": ME, "name": "Moi"},
                                                                              {"id": ALICE, "name": "Alice"}]}
@@ -459,7 +460,8 @@ def test_join_by_spoken_name_accents_emojis_and_server_preference():
     assert engine.act("join", salon="général")["text"].startswith("Vous avez rejoint Général")  # serveur actuel
     assert engine.act("join", salon="Général")["text"] == "Vous êtes déjà dans Général."
     assert engine.act("join", salon="cuisine")["text"] == "Je ne trouve pas de salon vocal « cuisine »."
-    assert engine.act("join")["text"] == "Quel salon vocal voulez-vous rejoindre ?"
+    # déjà dans un salon, aucun nommé (« connecte-moi en vocal ») : rien ne change, c'est dit
+    assert engine.act("join")["text"] == "Vous êtes déjà dans Général sur Amis."
     assert ("user", "CONTROL_DEVICE", "discord.join", "allow", "exécutée") in ledger.rows
 
 
@@ -709,3 +711,22 @@ def test_an_unknown_client_id_is_reported_clearly_like_the_real_discord_does(fak
     engine = DiscordEngine(FakeAgent(), settings=DiscordSettings())
     caps = engine.capabilities("en ligne", {"discord": "ouvert", "auth": "identifiant refusé"})
     assert caps["reason"] == "identifiant de l'application refusé par Discord"
+
+
+def test_connect_me_without_a_channel_uses_your_usual_channel_or_says_you_are_there():
+    """« Connecte-moi en vocal » (4 novembre 2026) : votre salon habituel, même sur un serveur que Discord ne liste
+    pas (« Et le Zombie avec ou sans ?? », connu parce qu'ORION vous y a vu) ; déjà dans un salon : rien ne change."""
+    agent = FakeAgent()
+    zombie = {"channel_id": "1400000000000000001", "channel": "Général", "guild_id": "1400000000000000000",
+              "guild": "Et le Zombie avec ou sans ??", "participants": []}
+    agent.remote["voice"] = zombie
+    engine = DiscordEngine(agent, ledger=Ledger(), settings=DiscordSettings(
+        default_salon="Général", default_serveur="Et le Zombie avec ou sans"))
+    engine.poll()
+    assert engine.act("join")["text"] == "Vous êtes déjà dans Général sur Et le Zombie avec ou sans ??."
+    engine.act("leave")
+    result = engine.act("join")
+    assert result["ok"] and agent.calls[-1] == ("discord_join", {"channel_id": zombie["channel_id"], "force": False})
+    bare, bare_agent, _ = engine_with()
+    assert bare.act("join")["text"] == "Quel salon vocal voulez-vous rejoindre ?"  # aucun salon habituel réglé
+    assert bare_agent.calls[-1][0] != "discord_join"

@@ -53,6 +53,9 @@ class DiscordSettings:
     directory_seconds: float = 600.0
     undeafen_keeps_mute: bool = True
     events_kept: int = 100
+    # « Connecte-moi en vocal » sans salon nommé : votre salon habituel ([discord] default_salon, default_serveur)
+    default_salon: str = ""
+    default_serveur: str = ""
 
 
 class DiscordEngine(BaseModule):
@@ -67,6 +70,7 @@ class DiscordEngine(BaseModule):
         self.settings = settings or DiscordSettings()
         self._lock = threading.Lock()
         self._remote: dict | None = None  # dernier état rendu par l'agent
+        self._seen: dict[str, tuple[dict, dict]] = {}  # salons où ORION vous a vu (identifiants)
         self._agent_state, self._agent_since, self._agent_error = OFFLINE, clock(), "jamais joint"
         self._last_seq = 0
         self._events: deque[dict] = deque(maxlen=self.settings.events_kept)
@@ -93,8 +97,8 @@ class DiscordEngine(BaseModule):
             self._went(OFFLINE, exc.message)
             return self.state()
         self._went(ONLINE, "")
+        self._apply(remote)  # état et salons où ORION vous a vu
         with self._lock:
-            self._remote = remote
             for event in news.get("events", []):
                 self._events.append(event)
             self._last_seq = max(self._last_seq, int(news.get("last", 0) or 0))
@@ -215,9 +219,15 @@ class DiscordEngine(BaseModule):
                 raise DiscordUnavailable("channel_not_found", "Salon inconnu : actualisez la liste.")
             guild, channel = known[0]
         elif not salon:
-            raise DiscordUnavailable("channel_missing", "Quel salon vocal voulez-vous rejoindre ?")
+            current = (self._remote or {}).get("voice") or {}
+            if current:  # « connecte-moi en vocal » alors que vous y êtes : rien ne change
+                where = f" sur {spoken(current['guild'])}" if current.get("guild") else ""
+                return f"Vous êtes déjà dans {spoken(current['channel'])}{where}."
+            if not self.settings.default_salon:
+                raise DiscordUnavailable("channel_missing", "Quel salon vocal voulez-vous rejoindre ?")
+            guild, channel = self._resolve_known(self.settings.default_salon, self.settings.default_serveur)
         else:
-            guild, channel = self.resolve(salon, serveur)
+            guild, channel = self._resolve_known(salon, serveur)
         current = (self._remote or {}).get("voice") or {}
         if current.get("channel_id") == channel["id"]:
             return f"Vous êtes déjà dans {spoken(channel['name'])}."
@@ -283,7 +293,26 @@ class DiscordEngine(BaseModule):
         if isinstance(remote, dict) and "discord" in remote:
             with self._lock:
                 self._remote = remote
+                voice = remote.get("voice") or {}
+                if voice.get("channel_id"):  # salon où vous êtes allé : retrouvable même absent de la liste
+                    self._seen[voice["channel_id"]] = ({"id": voice.get("guild_id", ""), "name": voice.get("guild", "")},
+                                                       {"id": voice["channel_id"], "name": voice.get("channel", "")})
         return remote or {}
+
+    def _resolve_known(self, salon: str, serveur: str) -> tuple[dict, dict]:
+        """``resolve``, puis les salons où ORION vous a vu : Discord ne donne pas toujours tous vos serveurs
+        (« Et le Zombie avec ou sans ?? », 4 novembre 2026 : absent de la liste, présent dans votre état vocal)."""
+        try:
+            return self.resolve(salon, serveur)
+        except DiscordUnavailable as exc:
+            if exc.code not in ("channel_not_found", "guild_not_found"):
+                raise
+            wanted, place = label(salon), label(serveur)
+            for guild, channel in list(self._seen.values()):
+                if (label(channel["name"]) == wanted or _matches(label(channel["name"]), wanted)) and \
+                        (not place or _matches(label(guild["name"]), place)):
+                    return guild, channel
+            raise
 
     def _record(self, principal: str, action: str, done: bool, reason: str) -> None:
         if self._ledger is None:

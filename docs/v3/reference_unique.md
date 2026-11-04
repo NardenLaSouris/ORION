@@ -84,4 +84,5 @@ Katana, arrêt du Core V2. Ces deux opérations attendent votre accord (§ 6).
    présence ; vos rappels, routines et souvenirs de la V2 attendent la vraie clé de données (F4) avant toute reprise.
 7. **Frag Factory réel** : `deploy\pc_fragfactory_reel.ps1` montre ce qu'il ferait ; `-Autoriser` sauvegarde et
    vérifie votre base, puis relie votre vraie instance.
-8. **Redémarrage du PC** : le seul moyen de vérifier le démarrage automatique (un seul agent, un seul ORION Control).
+8. **Redémarrage du PC** : `deploy\pc_controle_demarrage.ps1` avant (conforme le 4 novembre à 11:35) puis après ; il vérifie un seul superviseur, un seul agent V3, un seul ORION Control, les raccourcis, les ports, et l'agent vu par le Core. Frag Factory (instance d'essai) n'a pas de démarrage automatique : `deploy\pc_fragfactory_essai.ps1` après le redémarrage.
+9. **Fonctions de la V2 à récupérer** : `docs/v3/recuperation_v2.md`.

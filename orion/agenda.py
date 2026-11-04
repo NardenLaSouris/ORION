@@ -50,6 +50,9 @@ class CalendarEvent:
     source: str = "local"
     rule: str = ""  # RRULE iCalendar (répétition), développée à la lecture
     exdates: tuple[datetime, ...] = ()
+    recurrence_id: datetime | None = None  # occurrence modifiée d'une répétition (RECURRENCE-ID)
+    status: str = ""  # STATUS iCalendar : CONFIRMED, TENTATIVE, CANCELLED
+    sequence: int = 0  # SEQUENCE : révision de l'événement
 
     def as_dict(self) -> dict:
         return {"id": self.id, "title": self.title, "start": self.start.isoformat(), "end": self.end.isoformat(),
@@ -150,6 +153,13 @@ def _add_months(moment: datetime, months: int) -> datetime | None:
         return None
 
 
+def _with_day(moment: datetime, day: int) -> datetime | None:
+    try:
+        return moment.replace(day=day)
+    except ValueError:  # le 31 d'un mois de 30 jours : sauté
+        return None
+
+
 def occurrences(event: CalendarEvent, start: datetime, end: datetime) -> list[CalendarEvent]:
     """Occurrences d'un événement répété (RRULE : FREQ DAILY / WEEKLY / MONTHLY / YEARLY, INTERVAL, COUNT, UNTIL,
     BYDAY pour les semaines) qui tombent entre ``start`` et ``end`` ; dates exclues (EXDATE) retirées."""
@@ -167,6 +177,8 @@ def occurrences(event: CalendarEvent, start: datetime, end: datetime) -> list[Ca
         return [event] if event.end > start and event.start < end else []
     days = sorted(WEEKDAY_CODES[d[-2:]] for d in rule.get("BYDAY", "").split(",") if d[-2:] in WEEKDAY_CODES) \
         if freq == "WEEKLY" else []
+    month_days = sorted(int(d) for d in rule.get("BYMONTHDAY", "").split(",") if d.strip().isdigit()) \
+        if freq == "MONTHLY" else []
     duration = event.end - event.start
     found, produced, step = [], 0, 0
     while produced < MAX_OCCURRENCES and step < MAX_OCCURRENCES * 7:
@@ -175,6 +187,9 @@ def occurrences(event: CalendarEvent, start: datetime, end: datetime) -> list[Ca
         elif freq == "WEEKLY":
             week = event.start + timedelta(weeks=step * interval) - timedelta(days=event.start.weekday())
             candidates = [week + timedelta(days=d) for d in (days or [event.start.weekday()])]
+        elif freq == "MONTHLY" and month_days:
+            first = _add_months(event.start.replace(day=1), step * interval)
+            candidates = [c for c in (_with_day(first, d) for d in month_days) if c] if first else []
         elif freq == "MONTHLY":
             candidates = [c for c in [_add_months(event.start, step * interval)] if c]
         else:
@@ -191,6 +206,33 @@ def occurrences(event: CalendarEvent, start: datetime, end: datetime) -> list[Ca
             found.append(replace(event, id=f"{event.id}@{moment:%Y%m%dT%H%M}", start=moment, end=moment + duration,
                                  rule=""))
     return found
+
+
+def expand(events: list[CalendarEvent], start: datetime, end: datetime) -> list[CalendarEvent]:
+    """Occurrences entre ``start`` et ``end`` d'un calendrier iCalendar, comme les montre l'agenda d'origine :
+    répétitions développées, occurrence modifiée (même UID, RECURRENCE-ID) à la place de l'occurrence d'origine,
+    occurrence ou événement annulé (STATUS:CANCELLED) retiré, révision la plus récente (SEQUENCE) gardée."""
+    masters: dict[str, CalendarEvent] = {}
+    overrides: dict[tuple[str, datetime], CalendarEvent] = {}
+    for event in events:
+        if event.recurrence_id is not None:
+            key = (event.id, event.recurrence_id)
+            if key not in overrides or event.sequence >= overrides[key].sequence:
+                overrides[key] = event
+        elif event.id not in masters or event.sequence >= masters[event.id].sequence:
+            masters[event.id] = event
+    found = []
+    for master in masters.values():
+        if master.status == "CANCELLED":
+            continue
+        for occurrence in occurrences(master, start, end):
+            if (master.id, occurrence.start) not in overrides:
+                found.append(occurrence)
+    for (uid, moment), override in overrides.items():
+        if override.status == "CANCELLED" or not (override.end > start and override.start < end):
+            continue
+        found.append(replace(override, id=f"{uid}@{moment:%Y%m%dT%H%M}", rule=""))
+    return sorted(found, key=lambda e: (e.start, e.title))
 
 
 def parse_ics(text: str, source: str = "ics") -> list[CalendarEvent]:
@@ -218,10 +260,19 @@ def parse_ics(text: str, source: str = "ics") -> list[CalendarEvent]:
                             exdates.append(_ics_datetime(item, params.get("TZID", ""))[0])
                         except ValueError:
                             continue
+                recurrence = None
+                if "RECURRENCE-ID" in current:
+                    value, params = current["RECURRENCE-ID"]
+                    recurrence = _ics_datetime(value, params.get("TZID", ""))[0]
+                try:
+                    sequence = int(current.get("SEQUENCE", ("0", {}))[0] or 0)
+                except ValueError:
+                    sequence = 0
                 events.append(CalendarEvent(current.get("UID", (uuid.uuid4().hex[:8], {}))[0][:64], title[:120], start,
                                             max(end, start), all_day,
                                             current.get("LOCATION", ("", {}))[0].replace("\\,", ",")[:120], source,
-                                            current.get("RRULE", ("", {}))[0][:200], tuple(exdates)))
+                                            current.get("RRULE", ("", {}))[0][:200], tuple(exdates), recurrence,
+                                            current.get("STATUS", ("", {}))[0].strip().upper()[:20], sequence))
             except (KeyError, ValueError, TypeError):
                 pass
             current = None
@@ -259,7 +310,7 @@ class IcsCalendar:
         return events
 
     def events(self, start: datetime, end: datetime) -> list[CalendarEvent]:
-        return [o for e in self._fetch() for o in occurrences(e, start, end)]
+        return expand(self._fetch(), start, end)
 
 
 class Calendar:
@@ -268,6 +319,16 @@ class Calendar:
         self._providers = providers
         self._clock = clock
         self.day_start, self.day_end = day_start, day_end
+
+    def add_provider(self, provider) -> None:
+        """Fournisseur ajouté après la construction (agenda Google synchronisé par un module V3)."""
+        self._providers.append(provider)
+
+    def caveat(self) -> str:
+        """Réserve à dire avec la réponse : un fournisseur qui n'a pas pu se mettre à jour (jamais d'agenda supposé à
+        jour après un échec de synchronisation)."""
+        notes = [n for n in (getattr(p, "caveat", lambda: "")() for p in self._providers) if n]
+        return " ".join(notes)
 
     @property
     def local(self) -> LocalCalendar | None:
@@ -451,7 +512,9 @@ def calendar_tools(calendar: Calendar) -> list[Tool]:
                 slots.append(f"de {spoken_clock(cursor.hour, cursor.minute)} à {spoken_clock(e.start.hour, e.start.minute)}")
             cursor = max(cursor, e.end)
         part = {"morning": " matin", "afternoon": " après-midi", "evening": " soir"}.get(moment or "", "")
-        return {"day": _spoken_day(when, now.date()) + part, "slots": slots, "count": len(slots)}
+        # journée entière ou plusieurs jours (vacances, déplacement) : dit à part, jamais compté comme « libre »
+        all_day = [e.title for e in events if e.all_day or (e.start <= start and e.end >= end)]
+        return {"day": _spoken_day(when, now.date()) + part, "slots": slots, "count": len(slots), "all_day": all_day}
 
     def add_event(title: str, time: str, day: str | None = None, duration: int | None = None) -> dict:
         local = calendar.local
@@ -522,9 +585,18 @@ def calendar_tools(calendar: Calendar) -> list[Tool]:
         return " ; ".join(r["events"]) + "."
 
     def slots_said(r: dict) -> str:
+        busy = r.get("all_day") or []
+        note = (" Attention, toute la journée : " + " ; ".join(f"« {t} »" for t in busy) + ".") if busy else ""
         if not r["slots"]:
-            return f"Aucun créneau libre {r['day']}."
-        return f"{r['day'][:1].upper()}{r['day'][1:]}, vous êtes libre " + ", puis ".join(r["slots"]) + "."
+            return f"Aucun créneau libre {r['day']}." + note
+        return f"{r['day'][:1].upper()}{r['day'][1:]}, vous êtes libre " + ", puis ".join(r["slots"]) + "." + note
+
+    def checked(say: Callable[[dict], str]) -> Callable[[dict], str]:
+        """Réponse suivie de la réserve de fraîcheur (agenda Google non mis à jour depuis un échec)."""
+        def said(r: dict) -> str:
+            caveat = calendar.caveat()
+            return say(r) + (f" {caveat}" if caveat else "")
+        return said
 
     def duration_check(value: str) -> int:
         try:
@@ -544,17 +616,17 @@ def calendar_tools(calendar: Calendar) -> list[Tool]:
                      check=duration_check, evidence=duration_in_text, drop_unsaid=True)
     return [
         Tool("list_events", "Donne les événements du calendrier d'un jour (aujourd'hui, demain, jeudi, le 12...).",
-             {"day": day_param}, {"events": "événements du jour"}, Risk.SAFE, list_events, say=events_said),
+             {"day": day_param}, {"events": "événements du jour"}, Risk.SAFE, list_events, say=checked(events_said)),
         Tool("next_events", "Donne les prochains événements du calendrier.",
              {"count": Param(int, "nombre d'événements, s'il est dit", required=False, minimum=1, maximum=10)},
-             {"events": "événements à venir"}, Risk.SAFE, next_events, say=next_said),
+             {"events": "événements à venir"}, Risk.SAFE, next_events, say=checked(next_said)),
         Tool("search_events", "Cherche un événement dans le calendrier (rendez-vous chez le dentiste...).",
              {"query": Param(str, "mots de l'événement cherché", max_length=80)},
-             {"events": "événements trouvés"}, Risk.SAFE, search_events, say=search_said),
+             {"events": "événements trouvés"}, Risk.SAFE, search_events, say=checked(search_said)),
         Tool("free_slots", "Donne les créneaux libres d'une journée.",
              {"day": day_param, "duration": duration, "moment": moment_param}, {"slots": "créneaux libres"},
              Risk.SAFE, free_slots,
-             say=slots_said),
+             say=checked(slots_said)),
         Tool("add_event", "Ajoute un événement au calendrier à une heure précise.",
              {"title": Param(str, "intitulé de l'événement", max_length=120),
               "time": Param(str, "heure telle qu'elle a été dite", max_length=40, check=clock_check, evidence=clock_said),

@@ -474,9 +474,10 @@ def build_calendar(cfg: Config):
     from orion.agenda import Calendar, IcsCalendar, LocalCalendar
 
     providers = [LocalCalendar(cfg.calendar.path)]
-    ics = cfg.calendar.ics or secret("ORION_CALENDAR_ICS", ENV_FILE)
-    if ics:
-        providers.append(IcsCalendar(ics))
+    # [calendar] ics : fichier .ics (ou adresse non secrète) lu à la demande. L'adresse secrète d'un agenda Google
+    # (ORION_CALENDAR_ICS) n'est plus lue ici : le module V3 google_calendar la synchronise (scellée, F3, état).
+    if cfg.calendar.ics:
+        providers.append(IcsCalendar(cfg.calendar.ics))
     return Calendar(providers, day_start=cfg.calendar.day_start, day_end=cfg.calendar.day_end)
 
 
@@ -1081,6 +1082,8 @@ def build_agent(
                   foundation=foundation)
     if v3 is not None and cfg.tools.enabled:
         extra += v3.tools
+    if v3 is not None and calendar is not None and v3.calendar_provider is not None:
+        calendar.add_provider(v3.calendar_provider)  # agenda Google : mêmes outils (aujourd'hui, demain, libre ?)
     bulletin_delivery = build_bulletin_delivery(cfg, v3, mailbox, speaker)
     if bulletin_delivery is not None and cfg.tools.enabled:
         extra.append(bulletin_delivery.tool())  # « montre-moi le bulletin » ; étape de la routine réveil

@@ -28,6 +28,7 @@ class V3Modules:
         self.store, self.scheduler, self.alerts, self.registry, self.tools = store, scheduler, alerts, registry, tools
         self.contexts: dict = {}
         self.knowledge = None  # module KNOWLEDGE, s'il est actif
+        self.calendar_provider = None  # agenda Google synchronisé, s'il est actif
         self._calls = None
 
     def connect(self, calls: Any | None) -> None:
@@ -96,7 +97,9 @@ JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.
                # Conservation des connaissances : règle que vous avez fixée (décision n° 2), pas une initiative.
                "knowledge:retention": ("delegated:knowledge:retention", Capability.WRITE_DATA.value),
                # Suivi de vos missions (états d'après les tâches, blocages annoncés) : il ne lance rien.
-               "missions:refresh": ("delegated:missions:suivi", Capability.NOTIFY.value)}
+               "missions:refresh": ("delegated:missions:suivi", Capability.NOTIFY.value),
+               # Agenda Google : lecture de votre calendrier « ORION » que vous avez relié (annonces de changements).
+               "google_calendar:sync": ("delegated:google_calendar:sync", Capability.NOTIFY.value)}
 
 
 def classify_job(job_id: str) -> tuple[str, str]:
@@ -119,7 +122,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
     """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
     planificateur s'arrête net sur arrêt d'urgence."""
     wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel", "fragfactory", "discord",
-                                       "knowledge", "missions")
+                                       "knowledge", "missions", "google_calendar")
               if getattr(cfg, name).enabled]
     if not wanted:
         return None
@@ -297,7 +300,25 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
             registry.register(MissionsModule(foundation.store, foundation.tasks, events=foundation.events,
                                              ledger=foundation.ledger, scheduler=scheduler,
                                              refresh_seconds=cfg.missions.refresh_seconds))
+    calendar_provider = None
+    if "google_calendar" in wanted:
+        if foundation is None:
+            log.warning("Agenda Google : sans CORE FOUNDATION (scellement F4) : module non démarré")
+        else:
+            from orion.config import secret
+            from orion.factory import ENV_FILE
+            from orion.google_calendar import GoogleCalendarModule, GoogleCalendarProvider, GoogleCalendarSettings
+
+            g = cfg.google_calendar
+            gcal = GoogleCalendarModule(
+                foundation.store, foundation.tasks.sealer, lambda: secret(g.secret_env, ENV_FILE),
+                events=foundation.events, scheduler=scheduler,
+                settings=GoogleCalendarSettings(g.name, g.interval_seconds, g.past_days, g.future_days, g.timeout,
+                                                g.max_bytes, g.failure_alert_minutes, 3 * g.interval_seconds))
+            registry.register(gcal)
+            calendar_provider = GoogleCalendarProvider(gcal)
     modules = V3Modules(store, scheduler, alerts, registry, tools)
+    modules.calendar_provider = calendar_provider  # lu par les outils de l'agenda (orion.agenda.Calendar)
     modules.contexts = contexts
     modules.knowledge = registry.get("knowledge")  # interface tracée pour les modules (reader(principal))
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)

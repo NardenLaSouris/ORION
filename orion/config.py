@@ -480,6 +480,22 @@ class KnowledgeConfig:
 
 
 @dataclass(frozen=True)
+class GoogleCalendarConfig:
+    """Agenda Google « ORION » (docs/v3/google_calendar.md) : lecture seule par l'adresse secrète iCal, tirée du
+    .env de la V3 (secret_env, saisie sur le Core par deploy/v3_calendar_setup.sh), jamais de cette configuration.
+    Base personnelle verrouillée : module actif mais verrouillé (aucune synchronisation)."""
+    enabled: bool = False
+    name: str = "ORION"  # nom du calendrier Google (affiché ; l'adresse choisit le calendrier)
+    secret_env: str = "ORION_CALENDAR_ICS"
+    interval_seconds: float = 300.0
+    past_days: int = 30
+    future_days: int = 180
+    timeout: float = 15.0
+    max_bytes: int = 5_000_000
+    failure_alert_minutes: float = 30.0  # échec prolongé annoncé après ce délai (une fois)
+
+
+@dataclass(frozen=True)
 class MissionsConfig:
     """MISSIONS (docs/v3/missions.md, lot M1) : vos missions, plan scellé (lot F4) ; sans la clé, le module reste
     actif mais verrouillé. Création, validation et lancement : vous seul."""
@@ -568,6 +584,7 @@ class Config:
     discord: DiscordConfig = DiscordConfig()
     knowledge: KnowledgeConfig = KnowledgeConfig()
     missions: MissionsConfig = MissionsConfig()
+    google_calendar: GoogleCalendarConfig = GoogleCalendarConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -702,6 +719,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "discord": DiscordConfig,
         "knowledge": KnowledgeConfig,
         "missions": MissionsConfig,
+        "google_calendar": GoogleCalendarConfig,
         "purchase": PurchaseConfig,
         "fragfactory": FragFactoryConfig,
     }

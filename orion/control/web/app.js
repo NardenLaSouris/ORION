@@ -1053,9 +1053,37 @@
     });
   }
 
+  async function googleCalendarView() {
+    // Agenda Google « ORION » (docs/v3/google_calendar.md) : état seulement ; l'adresse iCal n'est jamais affichée
+    // (elle se saisit sur le Core : deploy/v3_calendar_setup.sh).
+    await moduleView("Agenda Google", "google_calendar", async (s) => {
+      const when = (t) => (t ? new Date(t * 1000).toLocaleString("fr-FR") : "jamais");
+      const refresh = () => show("google_calendar");
+      const notes = {
+        "verrouillé": "Base personnelle verrouillée : la clé de données (lot F4) n'existe pas encore. Le connecteur ne lit "
+          + "rien tant qu'elle n'est pas créée.",
+        "non configuré": "Adresse iCal absente : sur le Core, lancez deploy/v3_calendar_setup.sh (saisie masquée).",
+        "en échec": "Dernière synchronisation en échec : ORION garde la dernière version connue et le signale dans ses réponses.",
+      };
+      view.replaceChildren(
+        el("h1", {}, "Agenda Google"),
+        notes[s.state] ? el("div", { class: "banner" }, notes[s.state]) : null,
+        cards([["Calendrier", s.calendar], ["État", s.state], ["Événements synchronisés", s.count],
+          ["Dernière synchronisation", when(s.last_success)], ["Dernier essai", when(s.last_attempt)],
+          ["Échecs consécutifs", s.failures, s.last_error || ""]]),
+        el("p", { class: "muted small" }, `Lecture seule, toutes les ${Math.round(s.interval_seconds / 60)} minutes ; `
+          + `fenêtre : ${s.window_days[0]} jours passés, ${s.window_days[1]} à venir.`),
+        el("div", { class: "toolbar" },
+          s.enabled ? button("Synchroniser maintenant", () => act(mod("google_calendar", "/sync", "POST"), "Synchronisé.").then(refresh)) : null,
+          s.enabled ? button("Désactiver", () => act(mod("google_calendar", "/disable", "POST"), "Désactivé.").then(refresh), "danger")
+            : button("Activer", () => act(mod("google_calendar", "/enable", "POST"), "Activé.").then(refresh))));
+    });
+  }
+
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
     news: newsView, sentinel: sentinelView, discord: discordView, evolve: evolveView, purchase: purchaseView,
-    notifications: notificationsView, autonomy: autonomyView, fragfactory: fragfactoryView, knowledge: knowledgeView };
+    notifications: notificationsView, autonomy: autonomyView, fragfactory: fragfactoryView, knowledge: knowledgeView,
+    google_calendar: googleCalendarView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],
     ["visage", "Comme le visage d'ORION (sa couleur du moment)"], ["jarvis", "ORION (jour)"],

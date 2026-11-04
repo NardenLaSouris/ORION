@@ -31,6 +31,9 @@ DEFAULT_OUT = Path.home() / "sauvegardes" / "orion-v3"
 DATABASES = (".db", ".sqlite")
 FILES = (".json", ".jsonl")
 SKIP = ("-wal", "-shm", ".tmp")
+# Secrets rangés dans le dossier de données (jeton de connexion Spotify, en 600 au compte orion-v3) : jamais
+# sauvegardés, comme les clés ; une nouvelle connexion les recrée. Notés comme exclus dans le manifeste.
+SECRET_FILES = frozenset({"spotify_token.json"})
 SERVICE = "orion-v3"
 
 
@@ -62,9 +65,12 @@ def backup(data: Path, out: Path, keep: int) -> Path:
     target = out / time.strftime("%Y-%m-%dT%H%M%S")
     target.mkdir(parents=True, exist_ok=False)
     target.chmod(0o700)
-    manifest = {"format": 1, "source": str(data), "created_at": time.time(), "files": {}}
+    manifest = {"format": 1, "source": str(data), "created_at": time.time(), "files": {}, "excluded": []}
     for item in sorted(data.iterdir()):
         if not item.is_file() or item.name.endswith(SKIP):
+            continue
+        if item.name in SECRET_FILES:
+            manifest["excluded"].append(item.name)
             continue
         copy = target / item.name
         if item.suffix in DATABASES:

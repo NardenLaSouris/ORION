@@ -88,3 +88,15 @@ def test_deploy_script_targets_v3_only():
     bash = shutil.which("bash")
     if bash:
         assert subprocess.run([bash, "-n", str(ROOT / "deploy" / "v3_deploy.sh")]).returncode == 0
+
+
+def test_secrets_in_the_data_folder_are_never_backed_up(tmp_path):
+    """Jeton Spotify (en 600 au compte orion-v3, illisible par le compte du déploiement) : exclu et noté, jamais
+    copié ; la sauvegarde ne s'arrête plus sur lui (déploiement du 4 novembre 2026 bloqué)."""
+    data, db = make_data(tmp_path)
+    (data / "spotify_token.json").write_text('{"access_token": "jeton-prive-42"}', encoding="utf-8")
+    saved = v3_backup.backup(data, tmp_path / "out", keep=2)
+    assert not (saved / "spotify_token.json").exists() and v3_backup.verify(saved) == []
+    manifest = (saved / "manifest.json").read_text(encoding="utf-8")
+    assert '"excluded"' in manifest and "spotify_token.json" in manifest and "jeton-prive-42" not in manifest
+    db.close()

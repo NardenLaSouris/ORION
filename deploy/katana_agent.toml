@@ -1,0 +1,28 @@
+# Agent Windows ORION (V3) du Katana (PC portable dédié à l'IA) : le seul agent ORION de cette machine
+# (docs/v3/reference_unique.md). Installé par deploy\katana_install.ps1 (depuis le PC) dans C:\Users\theju\.orion du
+# Katana ; secret : C:\Users\theju\.orion\data\.env (ORION_V3_AGENT_TOKEN, le jeton des agents V3).
+# Pas de micro ni de haut-parleurs relayés, pas de visage ouvert (le visage du Katana est un Chrome en kiosque) :
+# seulement les actions demandées par le Core V3 (« mets en pause sur le portable », charge affichée sur le fond
+# d'écran...).
+
+[agent]
+host = "0.0.0.0"
+port = 8875
+allowed_ips = ["192.168.1.91"]   # le Core V3 (mini-PC) seulement
+token_name = "ORION_V3_AGENT_TOKEN"
+audio = false
+pc_tools = true
+
+[face]
+open_on_connect = false
+
+[tools.files]
+enabled = true
+roots = { documents = "~/Documents", bureau = "~/Desktop", telechargements = "~/Downloads" }
+sandbox = "~/ORION"
+
+[tools.blocked_applications]
+paths = []
+executables = []
+steam = []
+store = []

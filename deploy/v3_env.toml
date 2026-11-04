@@ -181,6 +181,10 @@ reliability = "media"
 [sentinel]
 enabled = true
 
+# Connaissances (docs/v3/knowledge.md) : base personnelle chiffrée ; verrouillée tant que la clé n'existe pas.
+[knowledge]
+enabled = true
+
 # Discord Desktop du PC (docs/v3/discord.md) : agent Windows V3 (port 8875), jeton ORION_V3_AGENT_TOKEN du .env.
 [discord]
 enabled = true

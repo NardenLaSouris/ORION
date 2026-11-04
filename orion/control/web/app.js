@@ -1007,9 +1007,55 @@
     return e.kind;
   }
 
+  // Connaissances (KNOWLEDGE) : base personnelle chiffrée ; verrouillée tant que la clé n'existe pas.
+  const KNOWLEDGE_KIND = { fact: "fait", preference: "préférence", interest: "intérêt", hypothesis: "hypothèse" };
+  const KNOWLEDGE_STATUS = { active: "active", contested: "contestée", superseded: "remplacée", retracted: "retirée",
+    expired: "expirée" };
+  let knowledgeQuery = "";
+
+  async function knowledgeView() {
+    await moduleView("Connaissances", "knowledge", async (status) => {
+      if (status.locked) {
+        view.replaceChildren(el("h1", {}, "Connaissances"), el("div", { class: "banner" },
+          "Base personnelle verrouillée : la clé de données (lot F4) n'existe pas encore. Rien n'est lisible ni "
+          + "enregistré tant que vous ne l'avez pas créée (docs/v3/knowledge.md)."));
+        return;
+      }
+      const refresh = () => show("knowledge");
+      const conflicts = await mod("knowledge", "/conflicts");
+      const items = knowledgeQuery ? await mod("knowledge", `/search?q=${encodeURIComponent(knowledgeQuery)}`)
+        : await mod("knowledge", "/assertions");
+      const pct = (v) => `${Math.round(v * 100)} %`;
+      const actions = (a) => el("span", {},
+        a.kind === "hypothesis" ? button("Confirmer", () => act(mod("knowledge", `/assertions/${a.id}/confirm`, "POST"), "Confirmée.").then(refresh)) : null,
+        button("Retirer", () => act(mod("knowledge", `/assertions/${a.id}/retract`, "POST"), "Retirée.").then(refresh)),
+        button("Oublier", () => confirm("Supprimer définitivement cette connaissance ?")
+          && act(mod("knowledge", `/assertions/${a.id}`, "DELETE"), "Oubliée.").then(refresh), "danger"));
+      const search = el("input", { type: "search", value: knowledgeQuery, placeholder: "Rechercher (ex. Julie, Bretagne…)",
+        onchange: (e) => { knowledgeQuery = e.target.value.trim(); refresh(); } });
+      view.replaceChildren(
+        el("h1", {}, "Connaissances"),
+        cards([["Connaissances", status.assertions], ["Entités", status.entities],
+          ["Contradictions à arbitrer", status.open_conflicts],
+          ["Hypothèses", status.by_kind.hypothesis, "déductions jamais présentées comme sûres"]]),
+        el("h2", {}, "Contradictions"),
+        conflicts.length ? el("div", {}, conflicts.map((c) => el("div", { class: "card" },
+          el("div", { class: "muted small" }, `« ${c.predicate} » : deux valeurs incompatibles. Laquelle est juste ?`),
+          el("div", { class: "toolbar" }, c.choices.map((a) => button(`${a.text} (${a.sources.join(", ")})`,
+            () => act(mod("knowledge", `/conflicts/${c.id}/resolve`, "POST", { keep: a.id }), "Arbitré.").then(refresh))),
+            button("Aucune", () => act(mod("knowledge", `/conflicts/${c.id}/resolve`, "POST", { keep: null }), "Arbitré.").then(refresh), "danger")))))
+          : el("div", { class: "empty" }, "Aucune contradiction."),
+        el("h2", {}, knowledgeQuery ? `Recherche « ${knowledgeQuery} »` : "Ce qu'ORION sait de vous"),
+        el("div", { class: "toolbar" }, search),
+        table(["Connaissance", "Nature", "Confiance", "État", "Sources", ""], items.map((a) => [a.text,
+          KNOWLEDGE_KIND[a.kind] || a.kind, pct(a.confidence), KNOWLEDGE_STATUS[a.status] || a.status,
+          a.sources.join(", "), actions(a)]), "Rien pour l'instant."));
+    });
+  }
+
   const VIEWS = { dashboard, routines, devices, history: historyView, settings: settingsView, watch: watchView,
     news: newsView, sentinel: sentinelView, discord: discordView, evolve: evolveView, purchase: purchaseView,
-    notifications: notificationsView, autonomy: autonomyView, fragfactory: fragfactoryView };
+    notifications: notificationsView, autonomy: autonomyView, fragfactory: fragfactoryView, knowledge: knowledgeView };
 
   const THEMES = [["auto", "ORION automatique (nuit de 22 h à 7 h)"],
     ["visage", "Comme le visage d'ORION (sa couleur du moment)"], ["jarvis", "ORION (jour)"],

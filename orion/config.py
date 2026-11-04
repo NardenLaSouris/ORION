@@ -472,6 +472,14 @@ class SentinelConfig:
 
 
 @dataclass(frozen=True)
+class KnowledgeConfig:
+    """KNOWLEDGE (docs/v3/knowledge.md) : connaissances personnelles dans la base chiffrée (lot F4). Exige
+    [platform] personal = true ; sans la clé, le module reste actif mais verrouillé."""
+    enabled: bool = False
+    retention_hours: float = 24.0  # passage de la conservation (expiration)
+
+
+@dataclass(frozen=True)
 class DiscordConfig:
     """DISCORD (docs/v3/discord.md) : Discord Desktop du PC piloté par le RPC local officiel, via l'agent Windows V3
     (son jeton dans ``token_env`` du .env, jamais celui de la production)."""
@@ -550,6 +558,7 @@ class Config:
     sentinel: SentinelConfig = SentinelConfig()
     fragfactory: FragFactoryConfig = FragFactoryConfig()
     discord: DiscordConfig = DiscordConfig()
+    knowledge: KnowledgeConfig = KnowledgeConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -682,6 +691,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "evolve": EvolveConfig,
         "sentinel": SentinelConfig,
         "discord": DiscordConfig,
+        "knowledge": KnowledgeConfig,
         "purchase": PurchaseConfig,
         "fragfactory": FragFactoryConfig,
     }

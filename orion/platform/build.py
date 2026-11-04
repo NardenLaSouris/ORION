@@ -27,6 +27,7 @@ class V3Modules:
                  tools: list):
         self.store, self.scheduler, self.alerts, self.registry, self.tools = store, scheduler, alerts, registry, tools
         self.contexts: dict = {}
+        self.knowledge = None  # module KNOWLEDGE, s'il est actif
         self._calls = None
 
     def connect(self, calls: Any | None) -> None:
@@ -91,7 +92,9 @@ JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.
                # Frag Factory : notifications de clips et rapport du matin, que vous avez activés vous-même.
                "fragfactory:sync": ("delegated:fragfactory:notifications", Capability.NOTIFY.value),
                "fragfactory:report": ("delegated:fragfactory:report", Capability.NOTIFY.value),
-               "discord:poll": ("module:discord", Capability.READ.value)}
+               "discord:poll": ("module:discord", Capability.READ.value),
+               # Conservation des connaissances : règle que vous avez fixée (décision n° 2), pas une initiative.
+               "knowledge:retention": ("delegated:knowledge:retention", Capability.WRITE_DATA.value)}
 
 
 def classify_job(job_id: str) -> tuple[str, str]:
@@ -113,7 +116,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
              foundation=None) -> V3Modules | None:
     """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
     planificateur s'arrête net sur arrêt d'urgence."""
-    wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel", "fragfactory", "discord")
+    wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel", "fragfactory", "discord",
+                                       "knowledge")
               if getattr(cfg, name).enabled]
     if not wanted:
         return None
@@ -269,7 +273,21 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
             registry.register(discord)
             tools += discord_tools(discord)
             contexts["discord.deafened"] = discord.deafened
+    if "knowledge" in wanted:
+        if foundation is None or foundation.personal is None:
+            log.warning("KNOWLEDGE : [platform] personal désactivé, pas de base personnelle : module non démarré")
+        else:
+            from orion.knowledge import KnowledgeBase, KnowledgeModule, KnowledgeSettings
+
+            def record(principal: str, action: str, reason: str) -> None:
+                foundation.ledger.append(principal, Capability.WRITE_DATA.value, action, "allow", reason)
+
+            knowledge = KnowledgeModule(KnowledgeBase(foundation.personal, record=record),
+                                        decide=permits.decide, scheduler=scheduler,
+                                        settings=KnowledgeSettings(cfg.knowledge.retention_hours))
+            registry.register(knowledge)
     modules = V3Modules(store, scheduler, alerts, registry, tools)
     modules.contexts = contexts
+    modules.knowledge = registry.get("knowledge")  # interface tracée pour les modules (reader(principal))
     log.info("Modules V3 activés : %s (base %s)", ", ".join(wanted), m.database)
     return modules

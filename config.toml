@@ -607,6 +607,12 @@ probe_seconds = 60.0
 history_days = 7
 notify_after_seconds = 120.0
 
+# Connaissances personnelles structurées (docs/v3/knowledge.md) : base chiffrée du lot F4 ([platform] personal) ;
+# verrouillées tant que la clé n'existe pas.
+[knowledge]
+enabled = false
+retention_hours = 24.0
+
 # Discord Desktop du PC (docs/v3/discord.md) : RPC local officiel via l'agent Windows V3 (jamais celui de la
 # production) ; jeton de l'agent dans le .env sous token_env.
 [discord]

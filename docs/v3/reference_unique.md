@@ -22,7 +22,7 @@ parallèle.
 | Git | `v3` : seule branche de développement ; `V2` gelée (maintenance explicite seulement) |
 | Mini-PC | `/opt/orion-v3`, service `orion-v3`, son `.env`, ses bases ; déploiement `deploy/v3_deploy.sh` (gardes, sauvegarde vérifiée, avance rapide seulement, contrôle de santé, retour automatique) |
 | PC fixe | `C:\Users\theju\.orion` : `releases\<commit>` (code), `current` / `previous`, `venv` (son propre Python), `agent.toml` (+ `agent.local.toml`), `data` (`.env`, journaux, liaison Discord), lanceur stable `pc_start.pyw` ; un raccourci « ORION Agent » et un « ORION Control » (démarrage de session et menu Démarrer) |
-| Katana | services IA : Ollama, transcription (GPU), visage en kiosque sur le visage V3 (port 8865) |
+| Katana | services IA seulement : Ollama, transcription (GPU, jeton de la V3), visage en kiosque sur le visage V3 (port 8865) ; plus d'agent ORION |
 
 Pourquoi `C:\Users\theju\.orion` : hors d'AppData (l'application Claude, installée en paquet isolé, y détourne les
 écritures de ses programmes ; c'est ce qui avait caché le `.env` de l'agent V3), et hors de `C:\Users\theju\ORION`
@@ -52,6 +52,7 @@ unique et la relance après plantage (superviseur) sont conservés. Journal : `d
 | 10:57 | Visage du Katana sur le visage V3 (`open_face.ps1`, ancienne version `.v2-20261104`) | Chrome en kiosque sur `http://192.168.1.91:8865/` |
 | 11:09 | `v3_reference_root.sh` lancé par vous : règles réseau installées, ressources du Core principal, Core V2 arrêté et désactivé | V2 `inactive` / `disabled`, `/opt/orion` intact |
 | 11:12 | Transcription du Katana : jeton propre à la V3 (sur votre accord ; ancien gardé : `token.txt.v2-20261104`) | « STT : GPU distant http://192.168.1.73:8766 » ; large-v3 sur CUDA, 401 sans jeton |
+| 11:25 | Agent V2 du Katana retiré (sur votre accord ; `deploy/katana_retrait_agent_v2.ps1`) : processus arrêtés, raccourci « JARVIS Agent.lnk » retiré ; sauvegarde `C:\Users\theju\orion-retrait-agent-v2` (configuration, jeton, raccourci) ; dossier `C:\Users\theju\jarvis` intact | plus rien sur 8765 ; transcription seule (une instance, tâche « ORION Transcription »), jeton V3 accepté, 401 sans jeton ; client du Core V3 : transcription réelle passée par le GPU (`last_source = gpu`) |
 | 11:00 | Copies de travail `orion-v3-agent` et `orion-fragfactory` retirées (propres, intégrées à `v3`, inutilisées ; branches gardées) | — |
 
 Refusé par le contrôle de sécurité automatique de la session (non contourné) : rotation du jeton de transcription du
@@ -64,17 +65,17 @@ Katana, arrêt du Core V2. Ces deux opérations attendent votre accord (§ 6).
 - **Core** : `sudo systemctl stop orion-v3 && sudo systemctl enable --now orion`, puis remettre
   `config.local.toml.avant-reference-…` si besoin ; `/opt/orion`, ses données, ses secrets et ses sauvegardes ne sont
   pas touchés.
-- **Katana** : `open_face.ps1.v2-20261104`.
+- **Katana** : `open_face.ps1.v2-20261104` (visage V2) ; `token.txt.v2-20261104` (ancien jeton de transcription) ; agent V2 : `powershell -ExecutionPolicy Bypass -File C:\Users\theju\orion-retrait-agent-v2\katana_retrait_agent_v2.ps1 -Retour`.
 
 ## 6. Ce qui vous attend
 
-1. **Sur le mini-PC** : `sudo bash /home/user/orion-v3/deploy/v3_reference_root.sh`. Il installe les règles réseau qui
+1. ~~**Sur le mini-PC**~~ (fait le 4 novembre à 11:09) : `sudo bash /home/user/orion-v3/deploy/v3_reference_root.sh`. Il installe les règles réseau qui
    permettent à la V3 de joindre la transcription du Katana, donne à la V3 les ressources du Core principal, arrête et
    désactive le Core V2 (conservé).
-2. **Transcription du Katana pour la V3** : dites-moi « autorise la rotation du jeton de transcription ». Je donnerai
+2. ~~**Transcription du Katana pour la V3**~~ (faite à 11:12) : dites-moi « autorise la rotation du jeton de transcription ». Je donnerai
    au service du Katana un jeton propre à la V3 (l'ancien est gardé à côté). En attendant, la V3 transcrit avec son
    Whisper local (plus lent).
-3. **Agent V2 du Katana** : il ne sert plus qu'au Core V2 ; dites-moi si je le retire (raccourci mis de côté).
+3. **Pare-feu du Katana** (administrateur) : la règle « JARVIS Agent (TCP 8765, mini-PC uniquement) » ne sert plus (agent V2 retiré le 4 novembre).
 4. **Fond d'écran** : dans Wallpaper Engine, écran principal, choisissez `edge://http://192.168.1.91:8867/` (déjà dans
    votre liste) à la place de `…:8767`.
 5. **Pare-feu Windows** (administrateur) : la règle « JARVIS Agent HTTP » (port 8765) ne sert plus.

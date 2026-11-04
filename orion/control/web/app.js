@@ -730,7 +730,10 @@
           auto.actif ? button("Couper le mode autonome", () => act(mod("evolve", "/auto", "PUT", { enabled: false }), "Mode autonome coupé.").then(refresh), "danger")
             : button("Activer le mode autonome", () => confirm("ORION modifiera et déploiera seule les améliorations jugées sans risque par Claude Code (retour arrière possible). Activer ?")
               && act(mod("evolve", "/auto", "PUT", { enabled: true }), "Mode autonome activé.").then(refresh), "primary"),
-          button("Examiner maintenant", () => act(mod("evolve", "/auto/cycle", "POST"), "Examen fait.").then(refresh))) : null,
+          button("Examiner maintenant", () => act(mod("evolve", "/auto/cycle", "POST"), "Examen fait.").then(refresh)),
+          button("Autoriser EVOLVE à modifier son code (30 jours, 3 par jour)", () => confirm("Accorder à EVOLVE la modification de son code dans son espace isolé, au plus 3 fois par jour, pendant 30 jours ? (révocable dans « Autonomie »)")
+            && act(api("POST", "/grants", { principal: "module:evolve", capability: "CODE_CHANGE", limits: { per_day: 3 }, days: 30 }),
+              "Autorisation accordée.").then(refresh))) : null,
         auto ? table(["Heure", "Type", "État", "Résumé", "Action"], auto.actions.slice(0, 40).map((a) => [stamp(a.at), a.kind, a.state,
           a.data.summary || a.data.request || a.data.title || "—",
           a.state === "déployée" ? button("Revenir en arrière", () => confirm("Annuler ce changement sur le Core ?")

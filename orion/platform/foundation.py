@@ -226,6 +226,19 @@ class Foundation:
             return 200, self.ledger.verify().as_dict()
         if route == ["grants"] and method == "GET":
             return 200, [g.as_dict() for g in self.permissions.grants.list(include_revoked=True)]
+        if route == ["grants"] and method == "POST":  # vous, depuis ORION Control : autorisation bornée
+            data = data if isinstance(data, dict) else {}
+            days = data.get("days")
+            if not isinstance(days, (int, float)) or isinstance(days, bool) or not 0 < days <= 90:
+                return 400, {"status": "error", "error": "bad_request", "message": "échéance de 1 à 90 jours"}
+            try:
+                grant = self.permissions.grants.grant(str(data.get("principal") or ""), str(data.get("capability") or ""),
+                                                      data.get("limits") if isinstance(data.get("limits"), dict) else {},
+                                                      self.permissions.grants._clock() + float(days) * 86400,
+                                                      granted_by=CONTROL)
+            except (ValueError, PermissionError) as exc:
+                return 400, {"status": "error", "error": "bad_request", "message": str(exc)}
+            return 201, grant.as_dict()
         if len(route) == 2 and route[0] == "grants" and method == "DELETE":
             ok = self.permissions.grants.revoke(route[1], by=CONTROL)
             return (200, {"status": "ok"}) if ok else (404, {"status": "error", "error": "not_found"})

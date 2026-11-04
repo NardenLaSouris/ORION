@@ -14,7 +14,7 @@ validation, permissions). Seuls les outils sans confirmation sont exécutables i
   GET  /api/modules                    modules V3 (état) ; /api/modules/<nom>/… : routes du module (orion/platform)
   GET | POST /api/autonomy             interrupteur d'autonomie ([platform]) ; réactiver exige la phrase de confirmation
   GET  /api/ledger | /api/ledger/verify  registre d'actions et vérification de son chaînage
-  GET  /api/grants  DELETE /api/grants/<id>  autorisations du moteur central (révocation)
+  GET  /api/grants  POST /api/grants  DELETE /api/grants/<id>  autorisations du moteur central (accord borné, révocation)
   GET  /api/tasks[/<id>]  POST /api/tasks/<id>/cancel|retry|confirm  tâches persistantes (F2)
   GET  /api/confirmations  POST /api/confirmations/<id>/approve|refuse  confirmations liées à une demande (F2)
 """

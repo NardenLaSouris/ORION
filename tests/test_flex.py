@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -215,3 +216,29 @@ def test_a_flex_rule_can_be_described_and_listed(tmp_path):
     entry = next(e for e in w.rules.rules if e.get("id") == "flex")
     text = w.rules.describe(entry)
     assert text.startswith("vous présenter mes capacités quand vous me le demandez")
+
+V3_TOOLS = frozenset({"discord_join", "fragfactory_list_clips", "news_bulletin", "create_watch", "sentinel_status"})
+
+
+def test_v3_capabilities_are_presented_only_when_really_there():
+    """État du 4 novembre 2026 : Discord, Frag Factory, NEWS, WATCH, SENTINEL, transcription sur GPU, fond d'écran ;
+    agenda Google présenté seulement synchronisé ; MISSIONS et KNOWLEDGE tus tant que la base est verrouillée."""
+    v3 = replace(FULL, tools=FULL.tools | V3_TOOLS, stt_gpu=True, wallpaper=True,
+                 extra={**FULL.extra, "google_calendar": lambda: "verrouillé", "missions": "verrouillé",
+                        "knowledge": lambda: "verrouillé"})
+    states = {name: state for name, state, _ in inventory(v3)}
+    for name in ("Discord", "Frag Factory", "actualités", "surveillance des prix", "santé des machines",
+                 "transcription sur GPU", "fond d'écran"):
+        assert states[name] == "opérationnel", name
+    assert states["agenda Google"] == states["missions"] == states["connaissances"] == "indisponible"
+    for seed in range(6):
+        sequences = presentation(v3, rng=random.Random(seed))
+        text = " ".join(sequences)
+        assert "Discord" in text and "Frag Factory" in text and "actualité" in text and "prix" in text
+        assert "santé de mes machines" in text and "mon écoute" in text
+        assert "agenda" not in text and "mission" not in text  # verrouillés ou non reliés : jamais présentés
+        assert all(len(s) < 330 for s in sequences)
+    relinked = replace(v3, extra={**v3.extra, "google_calendar": lambda: "à jour"})
+    assert "je connais votre agenda" in " ".join(presentation(relinked, rng=random.Random(1)))
+    assert {n: s for n, s, _ in inventory(replace(v3, extra={"google_calendar": lambda: 1 / 0}))}["agenda Google"] \
+        == "indisponible"  # état illisible : traité comme absent

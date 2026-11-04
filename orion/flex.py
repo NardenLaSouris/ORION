@@ -44,7 +44,18 @@ class Facts:
     wake_mac: bool = False  # adresse matérielle connue pour allumer un PC
     face: bool = False  # visage animé à l'écran
     learning: bool = False
+    # V3 : transcription sur le GPU du Katana, fond d'écran interactif ; états des modules relus au moment de parler
+    # (valeur ou fonction sans argument : l'agenda Google peut se relier après le démarrage).
+    stt_gpu: bool = False
+    wallpaper: bool = False
     extra: dict = field(default_factory=dict)
+
+    def state(self, key: str, default=""):
+        value = self.extra.get(key, default)
+        try:
+            return value() if callable(value) else value
+        except Exception:  # noqa: BLE001 - état illisible : traité comme absent, jamais présenté
+            return default
 
 
 def inventory(f: Facts) -> list[tuple[str, str, str]]:
@@ -78,6 +89,18 @@ def inventory(f: Facts) -> list[tuple[str, str, str]]:
     add("allumer un PC", "wake_pc" in t and f.wake_mac, condition="si le réveil réseau est activé sur le PC")
     add("éteindre un PC", "shutdown_pc" in t, "toujours après votre accord")
     add("apprentissage", f.learning, "vocabulaire, consignes, réveil")
+    # V3
+    add("transcription sur GPU", f.stt_gpu, "Whisper large-v3 sur le Katana, Whisper local en secours")
+    add("Discord", "discord_join" in t, "salons, micro et sourdine, toujours sur demande")
+    add("Frag Factory", "fragfactory_list_clips" in t, "clips de jeu, validation après confirmation")
+    add("actualités", "news_bulletin" in t, "bulletins du matin et du soir")
+    add("surveillance des prix", "create_watch" in t)
+    add("santé des machines", "sentinel_status" in t, "SENTINEL")
+    add("fond d'écran", f.wallpaper, "tableau de bord et commandes rapides")
+    google = f.state("google_calendar")
+    add("agenda Google", google == "à jour", "calendrier « ORION », lecture seule")
+    add("missions", f.state("missions") == "ouvert", "plans d'étapes que vous validez")
+    add("connaissances", f.state("knowledge") == "ouvert", "mémoire de vos préférences")
     add("plusieurs enceintes", False, "une seule sortie audio à la maison")
     return items
 
@@ -110,7 +133,8 @@ def presentation(f: Facts, phone: bool = False, rng: random.Random | None = None
                  "Mon rôle : coordonner votre environnement numérique et votre maison, et vous épargner les détails.")
     body = [f"Mon cœur réside sur {f.core_host}"]
     if f.llm_host:
-        body.append(f"je réfléchis grâce à un modèle de langage qui tourne sur {f.llm_host}")
+        body.append(f"je réfléchis grâce à un modèle de langage qui tourne sur {f.llm_host}"
+                    + (", qui fait aussi tourner mon écoute" if "transcription sur GPU" in have else ""))
     architecture = ", ".join(body)
     architecture += (f", et mes agents me donnent la main sur {_join(list(f.computers))}." if f.computers else ".")
     abilities = []
@@ -122,6 +146,8 @@ def presentation(f: Facts, phone: bool = False, rng: random.Random | None = None
         abilities.append("je repère les échéances dans vos mails")
     elif "mails" in have:
         abilities.append("je trie et je lis vos mails")
+    if "agenda Google" in have:
+        abilities.append("je connais votre agenda")
     if "lumières" in have:
         abilities.append("je pilote l'éclairage de la maison")
     if "musique" in have:
@@ -130,12 +156,27 @@ def presentation(f: Facts, phone: bool = False, rng: random.Random | None = None
         abilities.append("j'ouvre vos applications et vos fichiers")
     if "recherche d'informations" in have or "météo" in have:
         abilities.append("je trouve l'information qu'il vous faut" + (", météo comprise" if "météo" in have else ""))
+    if "actualités" in have:
+        abilities.append("je vous résume l'actualité, matin et soir")
+    if "surveillance des prix" in have:
+        abilities.append("je guette les prix qui vous intéressent")
+    if "Discord" in have:
+        abilities.append("je vous fais entrer dans vos salons Discord, micro coupé à votre demande")
+    if "Frag Factory" in have:
+        abilities.append("je vous présente les clips que Frag Factory a tirés de vos parties")
     head = _pick(rng, "Concrètement, ", "Au quotidien, ", "Dans les faits, ")
-    if len(abilities) > 3:  # deux séquences courtes plutôt qu'une énumération
-        skills = [f"{head}{_join(abilities[:3])}.",
-                  f"{_pick(rng, 'Et puis, ', 'Par ailleurs, ', 'Enfin, ')}{_join(abilities[3:])}."]
-    else:
-        skills = [head + _join(abilities) + "."] if abilities else []
+    # séquences courtes de trois capacités au plus, plutôt qu'une énumération
+    chunks = [abilities[i:i + 3] for i in range(0, len(abilities), 3)]
+    middle = rng.sample(["Et puis, ", "Par ailleurs, ", "Ensuite, ", "Mais aussi, "], 4)  # jamais deux fois la même
+    skills = []
+    for n, chunk in enumerate(chunks):
+        if n == 0:
+            lead = head
+        elif n == len(chunks) - 1:
+            lead = "Enfin, "
+        else:
+            lead = middle[(n - 1) % len(middle)]
+        skills.append(lead + _join(chunk) + ".")
     calls = ""
     if "appels et messages" in have:
         calls = _pick(rng, "Et lorsque vous n'êtes pas là, je ne reste pas muette : je peux vous appeler, ou vous "
@@ -151,6 +192,8 @@ def presentation(f: Facts, phone: bool = False, rng: random.Random | None = None
         watch.append("je sais quand vous partez et quand vous rentrez")
     if "règles d'appel" in have or f.call_rules:
         watch.append("j'applique les règles que vous m'avez confiées")
+    if "santé des machines" in have:
+        watch.append("je surveille la santé de mes machines")
     watch.append("je vous préviens de ce qui compte, au bon moment")
     autonomy = f"Et je veille même sans qu'on me sollicite : {_join(watch)}. Pour tout ce qui est sensible, " \
                "j'attends toujours votre accord."

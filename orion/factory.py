@@ -251,8 +251,25 @@ def build_call_rules(cfg: Config, llm, presence, timers, mailbox, mail_actions=N
     return rules, tools
 
 
+def _v3_states(v3) -> dict:
+    """États des modules V3 pour l'inventaire de Flex, relus au moment de la présentation (fonctions) : l'agenda
+    Google relié, MISSIONS et KNOWLEDGE ouverts (base personnelle déverrouillée) ; absents : rien n'est présenté."""
+    registry = getattr(v3, "registry", None)
+    if registry is None:
+        return {}
+    states = {}
+    google = registry.get("google_calendar")
+    if google is not None:
+        states["google_calendar"] = lambda: google.status().get("state", "")
+    for name in ("missions", "knowledge"):
+        module = registry.get(name)
+        if module is not None:
+            states[name] = lambda m=module: "verrouillé" if m.status().get("locked") else "ouvert"
+    return states
+
+
 def connect_flex(cfg: Config, rules, tools, notifications, devices, rooms, presence, watcher, mail_actions, web,
-                 learning) -> None:
+                 learning, v3=None) -> None:
     """Mode Flex : inventaire de ce qui est réellement branché, présentation aux enceintes (canal vocal) et sortie
     audio de la maison joignable ou non."""
     from urllib.parse import urlsplit
@@ -277,7 +294,10 @@ def connect_flex(cfg: Config, rules, tools, notifications, devices, rooms, prese
                   calls=bool(cfg.call.enabled and cfg.call.device), mail_watch=watcher is not None,
                   mail_follow_up=mail_actions is not None, call_rules=len(rules.rules),
                   wake_mac=any(devices[k].mac for k in devices.keys()) if devices is not None else False,
-                  face=cfg.face.enabled, learning=learning is not None, extra={"web": web is not None})
+                  face=cfg.face.enabled, learning=learning is not None,
+                  stt_gpu=bool(cfg.stt.remote and secret("ORION_STT_TOKEN", ENV_FILE)),
+                  wallpaper=bool(cfg.wallpaper.enabled and cfg.wallpaper.actions),
+                  extra={"web": web is not None, **_v3_states(v3)})
 
     def present(sequences: list[str]) -> None:  # séquences courtes, dites l'une après l'autre quand ORION est libre
         for n, text in enumerate(sequences, 1):
@@ -1113,7 +1133,7 @@ def build_agent(
     speaker["core"] = tools
     if call_rules is not None and cfg.call.flex:
         connect_flex(cfg, call_rules, tools, notifications, devices, rooms, presence, watcher, mail_actions, web,
-                     learning)
+                     learning, v3=v3)
     if journal is not None:
         forward_journal = on_event
 

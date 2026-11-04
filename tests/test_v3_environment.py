@@ -148,8 +148,11 @@ def test_install_script_guards():
 
 
 def test_network_isolation_rules_cover_every_production_port():
+    """Le Core V2 (8765 à 8767) reste interdit à la V3 ; la passerelle d'appel (8770) lui est permise depuis que la V3
+    est le Core actif (4 novembre 2026 : elle l'utilise pour les appels)."""
     rules = (ROOT / "deploy" / "v3_isolation.nft").read_text(encoding="utf-8")
-    assert 'meta skuid "orion-v3"' in rules and "8765, 8766, 8767, 8770" in rules
+    assert 'meta skuid "orion-v3"' in rules and "8765, 8766, 8767 }" in rules
+    assert "8770" not in " ".join(line for line in rules.splitlines() if "meta skuid" in line)
     assert "127.0.0.0/8" in rules and "192.168.1.91" in rules and "::1" in rules  # boucle locale et réseau
     assert "192.168.1.128, 192.168.1.73" in rules  # agents de la production
     lines = " ".join(line for line in rules.splitlines() if "meta skuid" in line)

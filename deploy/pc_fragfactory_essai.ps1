@@ -6,13 +6,11 @@
 #   deploy\pc_fragfactory_essai.ps1 -Stop       arrête l'instance d'essai
 param([switch]$Clip, [switch]$Stop)
 $ErrorActionPreference = "Stop"
-# Frag Factory a été installé depuis l'application Claude : ses fichiers sont physiquement dans le stockage du paquet
-# (LocalCache), que seule l'application voit à l'adresse habituelle. Le premier chemin qui existe est retenu.
-$FFWork = "088b7887-957e-4849-9a79-bd6095b9d58e\5e9af580-f6cd-44f0-b10d-1e0f1c490b2b\scratch-2026-11-02-9bb6ed"
-$FFRoot = @((Join-Path $env:LOCALAPPDATA "Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\scratch-workspaces\$FFWork"),
-            (Join-Path $env:APPDATA "Claude\scratch-workspaces\$FFWork")) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $FFRoot) { throw "Dossier de Frag Factory introuvable." }
-$FFPython = "C:\Users\theju\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\FragFactory\venv\Scripts\python.exe"
+# Code et environnement Python de l'installation persistante de Frag Factory (deploy\pc_fragfactory_persistant.ps1) ;
+# les données d'essai restent à part (dossier ci-dessous), jamais celles de votre instance.
+$FFRoot = Join-Path $env:USERPROFILE "FragFactory"
+$FFPython = Join-Path $FFRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $FFPython)) { throw "Frag Factory introuvable dans $FFRoot (deploy\pc_fragfactory_persistant.ps1)." }
 $Agent = Join-Path $env:USERPROFILE ".orion"
 $Home_ = Join-Path $Agent "fragfactory-essai"
 $Config = Join-Path $Home_ "ff.toml"

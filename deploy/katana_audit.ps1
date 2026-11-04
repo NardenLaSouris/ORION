@@ -5,6 +5,8 @@
 # affiché : pour les fichiers .env, seuls leur présence et les NOMS des variables sont notés, jamais leurs valeurs.
 # Le rapport est écrit sur le Bureau (katana-audit-<date>.txt) ; il suffit de le renvoyer ou d'en coller le contenu.
 $ErrorActionPreference = "Continue"
+# Accents lisibles aussi quand le script est lancé par ssh depuis le PC.
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
 $Base = Join-Path $env:USERPROFILE ".orion"
 $Out = Join-Path ([Environment]::GetFolderPath("Desktop")) ("katana-audit-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".txt")
 $Lines = New-Object System.Collections.Generic.List[string]

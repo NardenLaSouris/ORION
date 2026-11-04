@@ -91,7 +91,9 @@ Katana, arrêt du Core V2. Ces deux opérations attendent votre accord (§ 6).
 6. **Fonctions encore propres à la V2**, qui demandent vos accès (jamais repris des secrets de la V2) : mails (mot de
    passe d'application Gmail), lumières (clés locales des ampoules), Spotify, appels (passerelle `orion-call`),
    présence ; vos rappels, routines et souvenirs de la V2 attendent la vraie clé de données (F4) avant toute reprise.
-7. **Frag Factory réel** : `deploy\pc_fragfactory_reel.ps1` montre ce qu'il ferait ; `-Autoriser` sauvegarde et
-   vérifie votre base, puis relie votre vraie instance.
-8. **Redémarrage du PC** : `deploy\pc_controle_demarrage.ps1` avant (conforme le 4 novembre à 11:35) puis après ; il vérifie un seul superviseur, un seul agent V3, un seul ORION Control, les raccourcis, les ports, et l'agent vu par le Core. Frag Factory (instance d'essai) n'a pas de démarrage automatique : `deploy\pc_fragfactory_essai.ps1` après le redémarrage.
+7. **Frag Factory réel** : installé depuis le 4 novembre (20:51) dans `C:\Users\theju\FragFactory` (code, `config.toml`,
+   `data`, `.venv`), hors du stockage de l'application Claude, et lancé au démarrage de session par le raccourci
+   « Frag Factory » (superviseur `C:\Users\theju\.orion\fragfactory\start.pyw`). Migration et retour :
+   `deploy\pc_fragfactory_persistant.ps1` (`-Retour`) ; détails dans `docs/v3/fragfactory.md` § 9.
+8. **Redémarrage du PC** : `deploy\pc_controle_demarrage.ps1` avant (conforme le 4 novembre à 11:35) puis après ; il vérifie un seul superviseur, un seul agent V3, un seul ORION Control, les raccourcis, les ports, et l'agent vu par le Core. Frag Factory réel redémarre seul (raccourci « Frag Factory », à vérifier au prochain redémarrage) ; l'instance d'essai (8752) seulement à la main : `deploy\pc_fragfactory_essai.ps1`.
 9. **Fonctions de la V2 à récupérer** : `docs/v3/recuperation_v2.md`.

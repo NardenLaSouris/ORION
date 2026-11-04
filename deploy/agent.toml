@@ -36,9 +36,10 @@ redirect_uri = "http://localhost"   # déclaré tel quel dans le Developer Porta
 data_dir = "~/.orion/data"
 
 # Frag Factory sur ce PC (docs/v3/fragfactory.md) : relais en boucle locale vers l'API de Frag Factory.
-# Instance visée : l'instance d'ESSAI aux données fictives (port 8752). Votre vraie instance (port 8742) contient vos
-# enregistrements et transcriptions : la viser est votre décision (deploy\pc_fragfactory_reel.ps1).
+# Instance visée : votre instance (port 8742), installée dans C:\Users\theju\FragFactory et lancée au démarrage
+# (deploy\pc_fragfactory_persistant.ps1, sur votre accord du 4 novembre 2026). L'instance d'essai aux données
+# fictives (port 8752, deploy\pc_fragfactory_essai.ps1) se vise par agent.local.toml.
 [fragfactory]
 enabled = true
-url = "http://127.0.0.1:8752"
+url = "http://127.0.0.1:8742"
 timeout = 60.0

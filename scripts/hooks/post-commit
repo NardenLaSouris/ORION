@@ -1,0 +1,8 @@
+#!/bin/sh
+# Après chaque commit : coût de production mis à jour sur le Core V3 (scripts/production_stats_push.sh), en arrière-plan.
+# Installé dans le dossier des hooks du dépôt (partagé avec le worktree V2 jarvis) : sans ce script dans le dépôt
+# courant, il ne fait rien.
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -f "$top/scripts/production_stats_push.sh" ] || exit 0
+nohup sh "$top/scripts/production_stats_push.sh" >/dev/null 2>&1 &
+exit 0

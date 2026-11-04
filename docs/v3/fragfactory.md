@@ -124,3 +124,35 @@ agent V3 du PC, Frag Factory (port 8752).
 
 Test de bout en bout automatisé (`tests/test_fragfactory_e2e.py`) : vrai Frag Factory, vrai agent, et vrai transport
 V3 (`agent_transport`). Il passe sur le PC (93 s).
+
+## 9. Installation persistante (4 novembre 2026, sur votre accord)
+
+Frag Factory tournait depuis le stockage de l'application Claude (`…\Packages\Claude_pzs8sxrjxfjjc\LocalCache\…`),
+lancé depuis une session : arrêté avec elle, absent au redémarrage. Il est désormais installé dans
+`C:\Users\theju\FragFactory` :
+
+| Élément | Emplacement |
+|---|---|
+| Code (clone du dépôt, commit `96dc6df`, pas de dépôt distant) | `C:\Users\theju\FragFactory` |
+| Configuration | `C:\Users\theju\FragFactory\config.toml` (`data_dir = "data"`, relatif) |
+| Données | `C:\Users\theju\FragFactory\data` |
+| Python 3.13 et paquets (mêmes versions que l'ancien environnement, 55 paquets) | `C:\Users\theju\FragFactory\.venv` |
+| Superviseur, journaux | `C:\Users\theju\.orion\fragfactory` (`start.pyw`, `supervise.log`, `serve.log`) |
+| Démarrage | raccourci « Frag Factory » du dossier Démarrage ; arrêt propre : créer `…\.orion\fragfactory\stop` |
+
+Migration (`deploy\pc_fragfactory_persistant.ps1 -Autoriser`, outils `deploy\pc_fragfactory_migration.py`) :
+sauvegarde vérifiée (`.orion\sauvegardes\fragfactory-avant-migration-20261104-205102` : base, configuration,
+bundle git du code, comptes), arrêt, COPIE (1082 fichiers, 206,6 Mo, SHA-256 identiques), puis dans la copie
+seulement : 25 chemins de WAV d'analyse réécrits, 34 rendus en attente mis en pause, rendu automatique coupé
+(`config.toml` et `data\settings_override.json`, anciennes versions gardées en `*.avant-migration-*`) : un clip
+n'est rendu qu'à votre demande. Comptes identiques avant et après (168 REC, 882 clips dont 34 pépites, tous en
+attente, 2800 segments de transcription, 0 décision) ; Core relié, curseur 530 sans doublon ; aucune transcription
+dans les journaux.
+
+Le premier passage avait échoué sans dommage : le manifeste de l'ancienne installation ignorait 5 fichiers aux chemins
+de plus de 260 caractères ; l'ancienne instance avait été relancée. Corrigé (chemins étendus `\?\`).
+
+**Retour arrière** : `deploy\pc_fragfactory_persistant.ps1 -Retour` arrête la nouvelle installation (rien n'est
+effacé) et relance l'ancienne, intacte. Ce qui a été fait dans la nouvelle (validations, rendus) n'y figure pas.
+L'ancienne installation est gardée au moins 14 jours ; son nettoyage attend votre accord. `pc_fragfactory_reel.ps1`
+refuse désormais de tourner (il relancerait l'ancienne sur d'anciennes données).

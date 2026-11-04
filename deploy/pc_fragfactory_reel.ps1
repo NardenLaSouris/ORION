@@ -8,6 +8,11 @@
 # liaison de l'agent, agent visant le port 8742 (agent.local.toml), vérification par le Core V3. Rien n'est effacé.
 param([switch]$Autoriser, [switch]$Retour)
 $ErrorActionPreference = "Stop"
+# Remplacé par deploy\pc_fragfactory_persistant.ps1 : une fois Frag Factory installé dans C:\Users\theju\FragFactory,
+# ce script relancerait l'ANCIENNE installation sur ses anciennes données (deux bases divergentes) : refusé.
+if (Test-Path (Join-Path $env:USERPROFILE "FragFactory\data\fragfactory.sqlite3")) {
+    throw "Frag Factory est installé dans $env:USERPROFILE\FragFactory : utilisez deploy\pc_fragfactory_persistant.ps1 (-Retour pour revenir)."
+}
 # Frag Factory a été installé depuis l'application Claude : ses fichiers sont physiquement dans le stockage du paquet
 # (LocalCache), que seule l'application voit à l'adresse habituelle. Le premier chemin qui existe est retenu.
 $FFWork = "088b7887-957e-4849-9a79-bd6095b9d58e\5e9af580-f6cd-44f0-b10d-1e0f1c490b2b\scratch-2026-11-02-9bb6ed"

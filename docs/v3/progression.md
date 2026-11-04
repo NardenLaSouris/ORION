@@ -84,8 +84,12 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 - Frag Factory réel : relier votre vraie instance (vos enregistrements et transcriptions) est votre décision
   (`fragfactory.md` § 7) ; la V3 est reliée à l'instance d'essai.
 
-**À chaque déploiement** (V3, et production quand elle est concernée) : relevé des tokens et des heures
-(`python scripts/production_stats.py`), copié dans `data/production_stats.json` de l'environnement.
+**À chaque commit** (depuis le 4 novembre 2026, à votre demande) : le hook `post-commit` (source
+`scripts/hooks/post-commit`, installé dans `C:\Users\theju\jarvis\.git\hooks`, partagé avec le worktree V2 où il ne
+fait rien) lance en arrière-plan `scripts/production_stats_push.sh` : relevé des tokens et des heures
+(`scripts/production_stats.py`, des nombres seulement), puis copie dans `/opt/orion-v3/data/production_stats.json`
+du Core (fichier temporaire puis remplacement). Le commit n'attend pas ; journal : `C:\Users\theju\.orion\production_stats.log`.
+Le relevé posé au déploiement (`/tmp/production_stats.json`) reste possible.
 
 ## Prochain chantier
 

@@ -49,16 +49,22 @@ New-Item -ItemType Directory -Force $Backup | Out-Null
 Copy-Item $FFConfig (Join-Path $Backup "config.toml")
 Get-ChildItem $DataDir -File -Filter *.json | Copy-Item -Destination $Backup
 $env:FF_SRC = $Db; $env:FF_DST = Join-Path $Backup "fragfactory.sqlite3"
-& $FFPython -I -c @"
+# Programme écrit dans un fichier : passé par -c, PowerShell 5.1 retire les guillemets doubles (« SyntaxError »).
+$Check = Join-Path $Backup "verifier.py"
+[IO.File]::WriteAllText($Check, @"
 import os, sqlite3
 src, dst = sqlite3.connect(os.environ['FF_SRC']), sqlite3.connect(os.environ['FF_DST'])
 src.backup(dst)
 ok = dst.execute('PRAGMA integrity_check').fetchone()[0]
 tables = dst.execute("select count(*) from sqlite_master where type='table'").fetchone()[0]
-print('intégrité :', ok, '; tables :', tables)
+dst.close()
+print('integrite :', ok, '; tables :', tables)
 raise SystemExit(0 if ok == 'ok' and tables else 1)
-"@
-if ($LASTEXITCODE) { throw "Sauvegarde non vérifiée : rien d'autre n'est fait ($Backup)." }
+"@, (New-Object Text.UTF8Encoding $false))
+& $FFPython -I $Check
+$Verified = $LASTEXITCODE
+Remove-Item $Check
+if ($Verified) { throw "Sauvegarde non vérifiée : rien d'autre n'est fait ($Backup)." }
 
 # 2. Liaison ORION dans la configuration de votre instance (ajoutée seulement si absente).
 $Text = [IO.File]::ReadAllText($FFConfig)

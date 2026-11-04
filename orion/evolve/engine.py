@@ -286,7 +286,7 @@ class EvolveEngine(BaseModule):
         try:
             repo = self.workspace.ensure()
         except Exception as exc:  # noqa: BLE001 - clone impossible : pas de consultation
-            raise ValueError(f"clone isolé du code indisponible ({type(exc).__name__})") from exc
+            raise ValueError(f"clone isolé du code indisponible ({str(exc)[-300:] or type(exc).__name__})") from exc
         context = {"question": str(question or "Quelles améliorations apporteraient le plus à ORION ?")[:2000]}
         anomalies = [a for a in self.anomalies() if a.get("status") == "ouverte"
                      and (not focus or a["signature"] in focus)][:10]

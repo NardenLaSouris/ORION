@@ -95,10 +95,12 @@ class Workspace:
         if "://" in self.source or not source.is_dir():
             return
         config = self.root / ".gitconfig"
-        line = f"\tdirectory = {source.resolve().as_posix()}\n"
+        resolved = source.resolve()
+        wanted = [f"\tdirectory = {path.as_posix()}\n" for path in (resolved, resolved / ".git")]
         text = config.read_text(encoding="utf-8") if config.exists() else ""
-        if line not in text:
-            config.write_text(text + ("[safe]\n" if "[safe]" not in text else "") + line, encoding="utf-8")
+        missing = [line for line in wanted if line not in text]
+        if missing:
+            config.write_text(text + ("[safe]\n" if "[safe]" not in text else "") + "".join(missing), encoding="utf-8")
 
     def current_branch(self) -> str:
         return self._git("rev-parse", "--abbrev-ref", "HEAD").strip()

@@ -109,8 +109,12 @@ class Workspace:
         if not SAFE_BRANCH.match(name):
             raise PolicyError(f"nom de branche refusé : {name!r} (evolve/…)")
         self.ensure()
-        self._git("checkout", "--quiet", self.base)
-        self._git("pull", "--quiet", "--ff-only", check=False)  # à jour avec la source si elle a avancé
+        self._git("checkout", "--quiet", "--force", self.base)
+        self._git("clean", "--quiet", "-fd")
+        # à jour avec la source, même revenue en arrière (retour arrière d'un déploiement) : le clone la suit
+        self._git("fetch", "--quiet", "origin", check=False)
+        if self._git("rev-parse", "--verify", "--quiet", f"origin/{self.base}", check=False).strip():
+            self._git("reset", "--quiet", "--hard", f"origin/{self.base}")
         existing = self._git("branch", "--list", name).strip()
         if existing:
             raise PolicyError(f"la branche {name} existe déjà")
@@ -146,6 +150,25 @@ class Workspace:
             target.write_text(content, encoding="utf-8")
             touched.append(path)
         return touched
+
+    def changed_files(self) -> list[str]:
+        """Fichiers modifiés, ajoutés ou supprimés par rapport à la branche suivie (travail en cours compris)."""
+        self._git("add", "--intent-to-add", "--all")
+        return [line for line in self._git("diff", "--name-only", self.base).splitlines() if line.strip()]
+
+    def deleted_files(self) -> list[str]:
+        return [line for line in self._git("diff", "--name-only", "--diff-filter=D", self.base).splitlines()
+                if line.strip()]
+
+    def changed_lines(self) -> int:
+        total = 0
+        for line in self._git("diff", "--numstat", self.base).splitlines():
+            counts = line.split()[:2]  # « ajoutées  supprimées  chemin » ; « - - » pour un fichier binaire
+            total += sum(int(n) for n in counts if n.isdigit())
+        return total
+
+    def head(self) -> str:
+        return self._git("rev-parse", "HEAD").strip()
 
     def diff(self) -> str:
         self._git("add", "--intent-to-add", "--all")

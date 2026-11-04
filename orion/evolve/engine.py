@@ -52,6 +52,12 @@ MIGRATIONS = (
         CREATE TABLE evolve_proposals (id TEXT PRIMARY KEY, at REAL NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
         CREATE TABLE evolve_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)
     """),
+    Migration(2, """
+        CREATE TABLE evolve_auto (
+            id TEXT PRIMARY KEY, at REAL NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL,
+            data TEXT NOT NULL
+        )
+    """),  # mode autonome (autopilot.py)
 )
 PROPOSAL_FIELDS = ("title", "description", "interest", "difficulty", "dependencies", "risks", "cost", "plan", "tests")
 PROPOSAL_SCHEMA = {
@@ -132,6 +138,7 @@ class EvolveEngine(BaseModule):
         store.migrate("evolve", MIGRATIONS)
         self.level_note = ""
         self.level = self._effective_level()
+        self.autopilot = None  # AutoPilot (autopilot.py), branché par la plateforme si configuré
 
     # --- Niveau (l'utilisateur seul le change) ---------------------------------------------------------------
 
@@ -159,9 +166,13 @@ class EvolveEngine(BaseModule):
     def start(self) -> None:
         self._scheduler.add("evolve:scan", self._defaults.scan_minutes * 60, self.scan,
                             first_at=self._clock() + 300)  # laisse ORION démarrer
+        if self.autopilot is not None:
+            self.autopilot.start()
 
     def stop(self) -> None:
         self._scheduler.remove("evolve:scan")
+        if self.autopilot is not None:
+            self.autopilot.stop()
 
     # --- Observation -----------------------------------------------------------------------------------------
 
@@ -454,7 +465,8 @@ class EvolveEngine(BaseModule):
                                                                                   for p in self.proposals()),
                 "correctifs": len(self.patches()), "dépôt_distant": bool(self._defaults.remote),
                 "claude_code": self._claude.state() if self._claude is not None else "non configuré",
-                "consultations_24h": len(self._claude_calls()), "consultations_max": self._defaults.claude_per_day}
+                "consultations_24h": len(self._claude_calls()), "consultations_max": self._defaults.claude_per_day,
+                "autonome": self.autopilot.status() if self.autopilot is not None else None}
 
     def admin(self, method: str, parts: list[str], query: dict, data: Any) -> tuple[int, Any]:
         try:
@@ -487,6 +499,17 @@ class EvolveEngine(BaseModule):
                     return 201, self.propose(data)
             if len(parts) == 3 and parts[0] == "proposals" and method == "POST" and parts[2] in ("accept", "reject"):
                 return 200, self.decide(parts[1], parts[2] == "accept", "utilisateur")
+            if parts and parts[0] == "auto" and self.autopilot is not None:
+                pilot = self.autopilot
+                if parts == ["auto"] and method == "GET":
+                    return 200, {**pilot.status(), "actions": pilot.actions()}
+                if parts == ["auto"] and method == "PUT":
+                    pilot.set_enabled((data or {}).get("enabled"), "utilisateur")
+                    return 200, pilot.status()
+                if parts == ["auto", "cycle"] and method == "POST":
+                    return 200, pilot.cycle()
+                if len(parts) == 3 and parts[2] == "rollback" and method == "POST":
+                    return 200, pilot.rollback(parts[1], "utilisateur")
             if parts == ["claude"] and method == "POST":
                 return 201, self.consult(str((data or {}).get("question", "")), "utilisateur")
             if parts == ["history"] and method == "GET":

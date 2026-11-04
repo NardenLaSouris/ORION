@@ -89,6 +89,8 @@ JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.
                "news:journal": ("delegated:news:journal", Capability.NOTIFY.value),
                "news:collect": ("module:news", Capability.READ.value),
                "evolve:scan": ("module:evolve", Capability.READ.value),
+               # Mode autonome que vous avez activé : il travaille dans le clone ; le déploiement est fait hors d'ORION.
+               "evolve:auto": ("module:evolve", Capability.READ.value),
                "sentinel:probe": ("module:sentinel", Capability.READ.value),
                # Frag Factory : notifications de clips et rapport du matin, que vous avez activés vous-même.
                "fragfactory:sync": ("delegated:fragfactory:notifications", Capability.NOTIFY.value),
@@ -227,9 +229,14 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                        effort=e.claude_effort, timeout=e.claude_timeout)
         settings = EvolveSettings(e.level, e.scan_minutes, tuple(e.journal_units), e.remote,
                                   claude_per_day=e.claude_per_day, claude_auto=e.claude_auto)
-        registry.register(EvolveEngine(store, workspace, settings=settings,
-                                       llm=structured, alerts=alerts, scheduler=scheduler, history=history,
-                                       gate=permits.gate("module:evolve") if permits else None, claude=claude))
+        evolve = EvolveEngine(store, workspace, settings=settings, llm=structured, alerts=alerts, scheduler=scheduler,
+                              history=history, gate=permits.gate("module:evolve") if permits else None, claude=claude)
+        if e.claude_code:
+            from orion.evolve.autopilot import AutoPilot, AutoSettings
+
+            evolve.autopilot = AutoPilot(evolve, AutoSettings(e.autonomous, e.deploys_per_day, e.auto_cycle_minutes,
+                                                              Path(e.workspace) / "deploy"))
+        registry.register(evolve)
     if "purchase" in wanted:
         from orion.purchase import PurchaseEngine, PurchaseSettings, SandboxMerchant, SandboxPayment
         from orion.purchase.tools import purchase_tools

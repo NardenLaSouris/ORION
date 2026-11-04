@@ -470,6 +470,11 @@ class EvolveConfig:
     claude_timeout: float = 900.0
     claude_per_day: int = 6
     claude_auto: bool = True
+    # Mode autonome (orion/evolve/autopilot.py) : demandes incomprises et propositions d'ORION jugées et réalisées par
+    # Claude Code, déployées par le service orion-v3-evolve (deploy/v3_evolve_root.sh) ; niveau 2 exigé.
+    autonomous: bool = False
+    deploys_per_day: int = 3
+    auto_cycle_minutes: float = 15.0
 
 
 @dataclass(frozen=True)

@@ -1179,6 +1179,17 @@ def build_agent(
             music.on_event(kind)
             if forward is not None:
                 forward(kind, text)
+    evolve = v3.registry.get("evolve") if v3 is not None else None
+    if evolve is not None and getattr(evolve, "autopilot", None) is not None:  # demandes incomprises -> EVOLVE
+        forward_evolve, pilot = on_event, evolve.autopilot
+
+        def on_event(kind: str, text: str, forward=forward_evolve) -> None:
+            try:
+                pilot.observe(kind, text)
+            except Exception:  # noqa: BLE001 - EVOLVE ne doit jamais couper une conversation
+                log.exception("EVOLVE : échange non observé")
+            if forward is not None:
+                forward(kind, text)
     routines = build_routines(cfg, tools, notifications, events, sink, timers, calendar, presence, personality,
                               mail_summary=watcher.summary if watcher is not None else None)
     api = build_api(cfg, tools, routines, web=web, devices=devices, rooms=rooms, driver=driver, timers=timers,

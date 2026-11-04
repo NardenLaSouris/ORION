@@ -691,8 +691,9 @@
 
   async function evolveView() {
     await moduleView("Évolution", "evolve", async (status) => {
-      const [anomalies, patches, proposals, history] = await Promise.all([mod("evolve", "/anomalies"),
-        mod("evolve", "/patches"), mod("evolve", "/proposals"), mod("evolve", "/history")]);
+      const [anomalies, patches, proposals, history, auto] = await Promise.all([mod("evolve", "/anomalies"),
+        mod("evolve", "/patches"), mod("evolve", "/proposals"), mod("evolve", "/history"),
+        status.autonome ? mod("evolve", "/auto") : Promise.resolve(null)]);
       const refresh = () => show("evolve");
       const detail = el("div", {});
       const question = el("input", { type: "text", placeholder: "Question pour Claude Code (facultatif)", style: "min-width:22em" });
@@ -719,6 +720,21 @@
           button("Niveau 1 (observateur)", () => act(mod("evolve", "/level", "PUT", { level: 1 }), "Niveau 1.").then(refresh)),
           button("Niveau 2 (développeur)", () => confirm("Autoriser EVOLVE à préparer des correctifs (branches, tests, commits) dans son espace isolé ?")
             && act(mod("evolve", "/level", "PUT", { level: 2 }), "Niveau 2.").then(refresh))),
+        el("div", {}, auto ? el("h2", {}, "Mode autonome") : null,
+        auto ? el("p", { class: "small" }, "Demandes incomprises et propositions d'ORION jugées et réalisées par Claude Code ; "
+          + "déployées seules si sans risque (service orion-v3-evolve : contrôle, tests, retour automatique), sinon envoyées à vous.") : null,
+        auto ? cards([["État", auto.actif ? (auto["prêt"] ? "actif" : "en pause") : "coupé", auto.raison || "prêt"],
+          ["Incomprises en attente", auto.incomprises_en_attente],
+          ["Déploiements (24 h)", `${auto["déploiements_24h"]} / ${auto["déploiements_max"]}`, auto["en_déploiement"] ? "déploiement en cours" : ""]]) : null,
+        auto ? el("div", { class: "toolbar" },
+          auto.actif ? button("Couper le mode autonome", () => act(mod("evolve", "/auto", "PUT", { enabled: false }), "Mode autonome coupé.").then(refresh), "danger")
+            : button("Activer le mode autonome", () => confirm("ORION modifiera et déploiera seule les améliorations jugées sans risque par Claude Code (retour arrière possible). Activer ?")
+              && act(mod("evolve", "/auto", "PUT", { enabled: true }), "Mode autonome activé.").then(refresh), "primary"),
+          button("Examiner maintenant", () => act(mod("evolve", "/auto/cycle", "POST"), "Examen fait.").then(refresh))) : null,
+        auto ? table(["Heure", "Type", "État", "Résumé", "Action"], auto.actions.slice(0, 40).map((a) => [stamp(a.at), a.kind, a.state,
+          a.data.summary || a.data.request || a.data.title || "—",
+          a.state === "déployée" ? button("Revenir en arrière", () => confirm("Annuler ce changement sur le Core ?")
+            && act(mod("evolve", `/auto/${a.id}/rollback`, "POST"), "Retour arrière demandé.").then(refresh), "danger") : "—"])) : null),
         el("h2", {}, "Anomalies"),
         table(["Type", "Titre", "Occurrences", "Dernière", "Actions"], anomalies.map((a) => [a.kind, a.title, String(a.count),
           stamp(a.last_at), el("div", { class: "row" }, button("Diagnostic", () => diagnose(a.signature)),

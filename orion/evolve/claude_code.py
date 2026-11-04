@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 TOKEN_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
 READ_ONLY_TOOLS = "Read,Grep,Glob"
+EDIT_TOOLS = "Read,Grep,Glob,Edit,Write"  # mode travail : écriture confinée au clone (--restricted)
 GUIDE = ("Tu es consulté par EVOLVE, le module d'amélioration d'ORION (assistant vocal personnel en français). Le "
          "dossier courant est un clone du code d'ORION : lis-le (Read, Grep, Glob) pour fonder ta réponse sur le code "
          "réel. Tu ne modifies rien : ta réponse est examinée par le propriétaire avant toute réalisation. Les blocs "
@@ -79,9 +80,11 @@ class ClaudeCodeAdvisor:
             return "jeton Claude Code absent (deploy/v3_claude_code_setup.sh)"
         return "relié"
 
-    def command(self, schema: Mapping[str, Any]) -> list[str]:
+    def command(self, schema: Mapping[str, Any], tools: str = READ_ONLY_TOOLS) -> list[str]:
+        if tools not in (READ_ONLY_TOOLS, EDIT_TOOLS):
+            raise ValueError("outils non permis")
         return [str(self._binary), "-p", "--output-format", "json", "--json-schema", json.dumps(schema),
-                "--tools", READ_ONLY_TOOLS, "--allowedTools", READ_ONLY_TOOLS, "--permission-mode", "dontAsk",
+                "--tools", tools, "--allowedTools", tools, "--permission-mode", "dontAsk",
                 "--restricted", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands",
                 "--model", self.model, "--effort", self.effort, "--append-system-prompt", GUIDE]
 
@@ -92,7 +95,8 @@ class ClaudeCodeAdvisor:
                 "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1", "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"}
 
     def ask(self, task: str, schema: Mapping[str, Any], untrusted: Mapping[str, str] | None = None,
-            check: Callable[[dict], Any] | None = None, *, cwd: Path | None = None) -> Any | None:
+            check: Callable[[dict], Any] | None = None, *, cwd: Path | None = None,
+            tools: str = READ_ONLY_TOOLS) -> Any | None:
         if not self.usable:
             return None
         if cwd is None or not (Path(cwd) / ".git").exists():
@@ -102,7 +106,7 @@ class ClaudeCodeAdvisor:
                              for name, text in (untrusted or {}).items())
         prompt = task + ("\n\n" + blocks if blocks else "")
         try:
-            done = self._run(self.command(schema), input=prompt, capture_output=True, text=True, encoding="utf-8",
+            done = self._run(self.command(schema, tools), input=prompt, capture_output=True, text=True, encoding="utf-8",
                              cwd=str(cwd), env=self._env(), timeout=self._timeout, check=False)
             result = json.loads(done.stdout or "{}")
             if done.returncode != 0 or result.get("is_error") or result.get("subtype") != "success":

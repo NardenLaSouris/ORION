@@ -607,6 +607,10 @@ claude_model = "opus"
 claude_effort = "high"
 claude_per_day = 6
 claude_auto = true
+# Mode autonome (docs/v3/evolve.md) : service deploy/v3_evolve_root.sh, puis interrupteur dans ORION Control
+autonomous = false
+deploys_per_day = 3
+auto_cycle_minutes = 15.0
 
 # Santé d'ORION et de ses ressources (docs/v3/sentinel.md) : lecture seule ; exige [platform].
 [sentinel]

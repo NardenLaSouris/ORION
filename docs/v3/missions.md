@@ -108,6 +108,31 @@ objectif dit ──► proposition de plan (LLM, schéma) ──► Plan.validat
 | M4 | Adaptation : sur un blocage, proposition de révision (`revise`) soumise à votre accord | M2 |
 | M5 | Bilan à la fin et bilan périodique (dans le journal NEWS ou une notification) | M1 |
 
+## 6 bis. Préparation de M2 (4 novembre 2026 ; implémentation reportée)
+
+Décision du propriétaire : M1 est livré ; M2 ne commence qu'une fois le socle quotidien suffisamment restauré
+(`docs/v3/recuperation_v2.md` : présence, mail, agenda, éclairage, Spotify, appels).
+
+**Constat préalable.** Un seul type de tâche F2 est enregistré aujourd'hui (`news.bulletin`). Un plan ne peut donc
+contenir, en pratique, que des étapes humaines : proposer des plans par le LLM avant M3 donnerait des missions presque
+entièrement « à faire vous-même ». **Ordre recommandé : M3 (quelques types de tâche en lecture) avant ou avec M2.**
+
+| Élément de M2 | Contenu prévu | Garde-fous |
+|---|---|---|
+| Schéma de plan | objet JSON : `objective`, `steps[]` (`id`, `title`, `kind`, `after`, `task_kind`, `params`, `sensitive`) ; `task_kind` choisi dans la liste des types enregistrés, fournie au LLM | `StructuredLLM.ask` (sortie validée par schéma) puis `Plan.validate` puis `MissionsModule.create` (types existants, champs limités) ; rien n'est créé sans passer les trois |
+| Sensibilité | le LLM peut marquer une étape sensible ; le code **ajoute** la marque pour toute étape dont le type de tâche a une capacité SPEND, SEND, DELETE ou CHANGE_CODE (jamais retirée par le LLM) | double garde : validation du plan, puis confirmation F2 au moment d'agir |
+| Voix | « organise… », « prépare… » : ORION propose le plan, le lit en résumé (nombre d'étapes, étapes sensibles), demande « je le garde en brouillon ? » ; « valide la mission » / « lance la mission » / « annule la mission » ; « où en est ma mission ? » | création en brouillon seulement ; validation et lancement : phrases explicites, comme le démute Discord ; jamais d'initiative |
+| ORION Control | vue Missions : liste, détail (étapes, états, blocages), boutons valider / lancer / valider une étape / étape faite / annuler, édition du brouillon (titres, ordre, dépendances, sensibilité) | les routes de M1 ; base verrouillée : bandeau, rien d'affiché |
+| Correction | vous modifiez le brouillon (Control) ou dites « enlève l'étape 3 » ; une révision passe par `Plan.revise` | une étape sensible modifiée redemande votre validation (déjà codé) |
+| LLM indisponible | pas de proposition : création manuelle dans Control seulement | jamais de plan inventé par des règles |
+
+**Dépendances.** M1 (livré) ; `StructuredLLM` (existant) ; la clé F4 pour que MISSIONS soit déverrouillé en service ;
+M3 pour des plans utiles.
+
+**Essais prévus.** Schéma refusé (champ inconnu, type inexistant, cycle) ; étape sensible ajoutée par le code ; brouillon
+jamais lancé sans « lance » ; LLM indisponible ; phrases de validation au milieu d'une autre conversation (ignorées) ;
+vue Control en base verrouillée.
+
 ## 7. Risques
 
 - **Plans irréalistes du LLM local** (Qwen 7B) : le schéma, la validation et votre accord filtrent. Le plan doit

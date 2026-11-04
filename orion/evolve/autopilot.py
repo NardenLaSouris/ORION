@@ -161,7 +161,7 @@ class AutoPilot:
             return "Claude Code n'est pas relié"
         if self.engine.workspace is None:
             return "aucun espace de travail"
-        return self.blocked
+        return ""  # le refus du moteur des permissions (self.blocked) est redemandé à chaque cycle
 
     # --- Demandes incomprises (événements de la conversation) ---------------------------------------------------
 
@@ -437,7 +437,8 @@ class AutoPilot:
         return list(reversed(self._rows()))[:100]
 
     def status(self) -> dict:
-        return {"actif": self.enabled, "prêt": not self.ready(), "raison": self.ready(),
+        reason = self.ready() or self.blocked
+        return {"actif": self.enabled, "prêt": not reason, "raison": reason,
                 "incomprises_en_attente": sum(r["state"] == PENDING_MISUNDERSTOOD for r in self._rows("incomprise")),
                 "déploiements_24h": self._deploys_today(), "déploiements_max": self.settings.deploys_per_day,
                 "en_déploiement": self._in_flight()}

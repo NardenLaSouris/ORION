@@ -279,3 +279,28 @@ def test_gate_refuses_a_change_not_built_on_the_deployed_code_and_too_many_per_d
     log = tmp_path / "log"
     log.write_text("".join(f"{int(time.time())} déployé abc{i} x : ok\n" for i in range(3)), encoding="utf-8")
     assert any("24 heures" in p for p in gate.problems(str(repo), base, commit, log))
+
+
+def test_a_permission_granted_later_is_seen_at_the_next_cycle(setup):
+    """Journal du 4 novembre 2026 : refusé une fois (autonomie suspendue), le pilote ne redemandait plus jamais."""
+    pilot, claude, _ = setup
+
+    class Verdict:
+        def __init__(self, allowed, reason=""):
+            self.allowed, self.reason = allowed, reason
+
+    class Gate:
+        allowed = False
+
+        def check(self, *a, **k):
+            return Verdict(self.allowed, "autonomie suspendue")
+
+    gate = Gate()
+    pilot.engine._gate = gate
+    misunderstood(pilot)
+    assert pilot.cycle()["état"] == "permission refusée : autonomie suspendue"
+    assert pilot.status()["raison"] == "permission refusée : autonomie suspendue"
+    gate.allowed = True
+    claude.plan("rien à faire", risk="nul")
+    assert pilot.cycle()["état"] == NOTHING
+    assert pilot.status()["prêt"]

@@ -229,6 +229,9 @@ class ToolCore:
             log.exception("Outil %s : erreur inattendue", tool.name)
             result = ToolResult(tool.name, False, error=EXECUTION_FAILED, message="L'action a échoué.")
         self._log(tool.name, request.parameters, "execution", decision, confirmation, result, started, user)
+        # dernière action, pour un pronom de la demande suivante (« allume-le » après « ouvre Prime Video sur le PC »)
+        self.registry.context["last.action"] = {"at": time.monotonic(), "tool": tool.name,
+                                                "parameters": dict(request.parameters), "success": result.success}
         return result
 
     @staticmethod

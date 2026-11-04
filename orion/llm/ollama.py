@@ -21,6 +21,10 @@ class LLMError(RuntimeError):
     kind = "error"
 
 
+class LLMBadOutput(LLMError):
+    """Le modèle a répondu, mais pas dans la forme demandée (JSON illisible) : le worker n'est pas en panne."""
+
+
 class LLMUnreachable(LLMError):
     kind = "unreachable"
 
@@ -113,7 +117,7 @@ class OllamaLLM:
         try:
             return json.loads(data["message"]["content"])
         except (KeyError, ValueError) as exc:
-            raise LLMError("Réponse JSON d'Ollama illisible") from exc
+            raise LLMBadOutput("Réponse JSON d'Ollama illisible") from exc
 
     def stream(self, messages: list[Message]) -> Iterator[str]:
         """Fragments de la réponse au fil de la génération. Fermer l'itérateur interrompt Ollama."""

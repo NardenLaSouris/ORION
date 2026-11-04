@@ -84,3 +84,26 @@ def test_a_cancelled_reminder_drops_out_of_the_shown_list(world):
     tools["list_reminders"].execute({})
     manager.cancel_reminder(ids[0])
     assert plan(planner, "supprime le premier") == ("cancel_reminder", {"reminder_id": ids[1]})
+
+
+def test_allume_le_follows_the_last_action_never_a_guess():
+    """« Ouvre Prime Video sur le PC » puis « Allume-le » (3 novembre 2026) allumait les lumières."""
+    import time as clock
+
+    from orion.tools import Param, Risk, Tool
+
+    registry = ToolRegistry()
+    for name in ("wake_pc", "light_on", "open_application"):
+        registry.register(Tool(name, name, {"device": Param(str, "appareil", required=False),
+                                             "room": Param(str, "pièce", required=False)}, {}, Risk.SAFE,
+                               lambda **kw: kw))
+    planner = QuickPlanner(registry)
+    assert plan(planner, "Allume-le") is None  # rien de récent : rien n'est deviné
+    registry.context["last.action"] = {"at": clock.monotonic(), "tool": "open_application",
+                                       "parameters": {"name": "Prime Video", "device": "pc"}, "success": False}
+    assert plan(planner, "Allume-le") == ("wake_pc", {"device": "pc"})
+    registry.context["last.action"] = {"at": clock.monotonic(), "tool": "light_off", "parameters": {"room": "chambre"},
+                                       "success": True}
+    assert plan(planner, "rallume la") == ("light_on", {"room": "chambre"})
+    registry.context["last.action"]["at"] -= 600
+    assert plan(planner, "rallume la") is None  # trop ancien

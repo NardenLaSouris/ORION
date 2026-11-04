@@ -28,6 +28,8 @@ from urllib.parse import urlsplit
 
 from orion.interfaces import Message
 
+from orion.llm.ollama import LLMBadOutput
+
 log = logging.getLogger(__name__)
 
 ONLINE, DEGRADED, OFFLINE = "ONLINE", "DEGRADED", "OFFLINE"
@@ -271,6 +273,11 @@ class FailoverLLM:
                 result = action(self._primary, messages)
                 self._succeeded(self._clock() - started)
                 return result
+            except LLMBadOutput:
+                # le worker a répondu (mal formé) : il n'est ni en panne ni lent ; l'appelant écarte la réponse
+                # (bulletins NEWS du 4 novembre 2026 : tout le LLM passait « dégradé » 8 s à 7 h 30 et 8 h 00)
+                self._succeeded(self._clock() - started)
+                raise
             except Exception as exc:
                 self._primary_failed(exc)
         if not fallback:

@@ -310,3 +310,17 @@ def test_a_frozen_worker_is_announced_before_the_slower_fallback():
     frozen.release.set()
     unreachable, _ = failover(FakeLLM("katana"), FakeLLM("local"), up=False, waiting_notice="Un instant, monsieur.")
     assert "".join(unreachable.stream(HELLO)) == "local parle."  # worker éteint : secours immédiat, rien à annoncer
+
+
+def test_a_malformed_json_answer_never_marks_the_worker_degraded():
+    """Bulletins NEWS du 4 novembre 2026 : « Réponse JSON d'Ollama illisible » faisait passer tout le LLM « dégradé ».
+    Le worker a répondu : il reste en ligne ; la réponse est écartée par l'appelant, sans bascule ni panne."""
+    from orion.llm.ollama import LLMBadOutput
+
+    primary, local = FakeLLM("katana", error=LLMBadOutput("Réponse JSON d'Ollama illisible")), FakeLLM("local")
+    llm, _ = failover(primary, local)
+    with pytest.raises(LLMBadOutput):
+        llm.chat_json(HELLO, {})
+    assert llm.state == ONLINE and not llm.degraded and local.calls == []
+    primary.error = None
+    assert llm.chat(HELLO) == "réponse de katana"  # aucune bascule sur le secours ensuite

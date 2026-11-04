@@ -14,6 +14,7 @@ le LLM, et tout passe par le Core (validation, permissions, confirmation) : ce m
 from __future__ import annotations
 
 import re
+import time
 
 from orion.personality import normalize
 from orion.scheduling.actions import CLOCK_WORDS
@@ -194,6 +195,8 @@ def _duration_phrase(text: str, after: tuple[str, ...] = ()) -> tuple[str, int, 
     return " ".join(words[start:end]), start, best[1]
 
 
+PRONOUN_ON = re.compile(r"(?:r?allume|demarre|reveille|rallume)\s+(?:le|la|l)")
+PRONOUN_SECONDS = 300.0
 FOLLOWUP = re.compile(r"(?:(?:et|non|oui|alors|bon|ok)\s+)?(?:(?P<verb>supprime|supprimes|supprimez|supprimer|"
                       r"annule|annules|annulez|efface|effacez|enleve|enlevez|retire|retirez|vire)\s*)?"
                       r"(?:aussi\s+|moi\s+)?(?P<target>.*?)(?:\s+aussi|\s+s il te plait|\s+stp|\s+merci)?")
@@ -279,7 +282,7 @@ class QuickPlanner:
             return None
         if memory is not None:
             return {"type": "tool_call", "tool": memory[0], "parameters": memory[1]}
-        followup = self._reminder_followup(norm)  # « supprime le premier » après une liste de rappels
+        followup = self._reminder_followup(norm) or self._pronoun(norm)  # suites de l'échange précédent
         if followup is not None:
             return {"type": "tool_call", "tool": followup[0], "parameters": followup[1]}
         parsers = (self._discord, self._media, self._calendar, self._routine, self._face, self._sound, self._lights, self._apps,
@@ -316,6 +319,23 @@ class QuickPlanner:
         if len(ids) == 1:
             return "cancel_reminder", {"reminder_id": ids[0]}
         return "cancel_all_reminders", {"reminder_ids": ",".join(ids)}
+
+    def _pronoun(self, norm):
+        """« Allume-le », « rallume-la » : ce que la dernière action visait, dans les 5 minutes. Message du
+        3 novembre 2026 : « Ouvre Prime Video sur le PC » (« Votre PC ne répond pas »), puis « Allume-le » allumait
+        les lumières. Sans action récente : rien n'est deviné."""
+        if PRONOUN_ON.fullmatch(norm) is None:
+            return None
+        last = self._registry.context.get("last.action")
+        if not isinstance(last, dict) or time.monotonic() - last.get("at", 0) > PRONOUN_SECONDS:
+            return None
+        tool, params = last.get("tool", ""), last.get("parameters", {})
+        if tool.startswith(("light_", "set_color", "set_brightness", "set_scene")) and self._exists("light_on"):
+            return "light_on", {k: v for k, v in params.items() if k == "room"}
+        device = params.get("device")
+        if device and self._exists("wake_pc") and tool not in ("shutdown_pc", "lock_pc"):
+            return "wake_pc", {"device": device}
+        return None
 
     def _memory(self, norm, text):
         """« Retiens que ... », « Que sais-tu de moi ? », « Oublie que ... » (avant les règles qui excluent « ne »)."""

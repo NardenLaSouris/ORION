@@ -506,7 +506,7 @@ class PurchaseConfig:
 class FragFactoryConfig:
     """Frag Factory (production de clips CS2 sur le PC fixe), supervisé par ORION. Inactif par défaut.
 
-    ORION l'atteint par l'agent Windows V3 du PC (action « fragfactory », [fragfactory] de deploy/v3_agent.toml),
+    ORION l'atteint par l'agent Windows V3 du PC (action « fragfactory », [fragfactory] de deploy/agent.toml),
     jamais par l'agent de la production : aucun port de Frag Factory n'est ouvert sur le réseau. Les réglages
     modifiables (heure du rapport, canaux…) sont ensuite gardés en base et réglés depuis ORION Control.
     """

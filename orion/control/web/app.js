@@ -940,8 +940,8 @@
   // Ce qu'il reste à faire, selon ce qui manque (docs/v3/discord.md § 5).
   const DISCORD_HELP = {
     "application ORION non configurée": "Sur le PC : powershell -ExecutionPolicy Bypass -File "
-      + "C:\\Users\\theju\\orion-v3\\deploy\\v3_discord_setup.ps1, puis « Relier ORION à Discord » ci-dessous.",
-    "identifiant de l'application refusé par Discord": "Vérifiez le Client ID : relancez deploy\\v3_discord_setup.ps1.",
+      + "C:\\Users\\theju\\orion-v3\\deploy\\discord_setup.ps1, puis « Relier ORION à Discord » ci-dessous.",
+    "identifiant de l'application refusé par Discord": "Vérifiez le Client ID : relancez deploy\\discord_setup.ps1.",
     "ORION non autorisé dans Discord": "Cliquez sur « Relier ORION à Discord », puis « Autoriser » dans Discord.",
     "Discord fermé sur le PC": "Ouvrez Discord sur le PC : ORION s'y reconnecte seul.",
   };

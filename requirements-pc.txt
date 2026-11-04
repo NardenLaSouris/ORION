@@ -1,0 +1,8 @@
+# Installation ORION du PC fixe (agent Windows et ORION Control), environnement à part : deploy\pc_install.ps1
+#   C:\Users\theju\.orion\venv\Scripts\python -m pip install -r requirements-pc.txt
+numpy==2.5.3           # agent : audio
+sounddevice==0.5.6     # agent : micro et haut-parleurs
+psutil==7.2.2          # agent : applications ouvertes
+pywebview==6.2.1       # ORION Control : fenêtre native (WebView2)
+pystray==0.19.5        # ORION Control : icône dans la zone de notification
+pillow==12.3.0         # ORION Control : dessin de l'icône

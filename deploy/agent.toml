@@ -1,0 +1,44 @@
+# Agent Windows ORION (V3) du PC fixe : le SEUL agent ORION de ce PC (docs/v3/installation_pc.md).
+# Installé et mis à jour par deploy\pc_install.ps1 dans C:\Users\theju\.orion (copié en agent.toml à la racine ;
+# réglages propres à la machine : agent.local.toml à côté). Secrets hors du dépôt : C:\Users\theju\.orion\data\.env
+# (ORION_V3_AGENT_TOKEN, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, FRAGFACTORY_LINK_TOKEN).
+
+[agent]
+host = "0.0.0.0"
+port = 8875
+allowed_ips = ["192.168.1.91"]   # le Core V3 (mini-PC) seulement
+token_name = "ORION_V3_AGENT_TOKEN"
+audio = true                     # micro, voix et musique relayés pour le Core V3
+pc_tools = true                  # applications, volume, fichiers, verrouillage...
+
+[audio]
+input_device = "Chat Mic (2- TC-HELICON GoXLR), MME"
+output_device = "Music (2- TC-HELICON GoXLR), MME"
+
+[face]
+open_on_connect = true
+port = 8865                      # visage du Core V3
+
+[tools.files]
+enabled = true
+roots = { documents = "~/Documents", bureau = "~/Desktop", telechargements = "~/Downloads" }
+sandbox = "~/ORION"
+
+[tools.blocked_applications]
+paths = []
+executables = []
+steam = []
+store = []
+
+[discord]
+enabled = true
+redirect_uri = "http://localhost"   # déclaré tel quel dans le Developer Portal (OAuth2 > Redirects)
+data_dir = "~/.orion/data"
+
+# Frag Factory sur ce PC (docs/v3/fragfactory.md) : relais en boucle locale vers l'API de Frag Factory.
+# Instance visée : l'instance d'ESSAI aux données fictives (port 8752). Votre vraie instance (port 8742) contient vos
+# enregistrements et transcriptions : la viser est votre décision (deploy\pc_fragfactory_reel.ps1).
+[fragfactory]
+enabled = true
+url = "http://127.0.0.1:8752"
+timeout = 60.0

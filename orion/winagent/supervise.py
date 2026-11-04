@@ -1,6 +1,6 @@
 """Superviseur de l'agent Windows V3 : une seule instance, relance automatique, journal.
 
-    pythonw -m orion.winagent.supervise --config deploy\\v3_agent.toml --env <...>\\.env --log-file <...>\\agent.log
+    pythonw C:\\Users\\theju\\.orion\\pc_start.pyw agent   (installation de référence : deploy\\pc_install.ps1)
 
 - **Une seule instance** : verrou exclusif sur ``supervise.lock`` (dossier du journal), tenu tant que le superviseur
   vit ; un second lancement (raccourci de démarrage + lancement à la main) s'arrête aussitôt, sans rien toucher.
@@ -8,7 +8,7 @@
 - **Relance** : l'agent (processus enfant, mêmes arguments) qui s'arrête est relancé après 2 s, puis 4, 8… jusqu'à
   60 s ; le délai repart de 2 s après 5 minutes de fonctionnement normal. Un code 2 (configuration invalide) n'est pas
   relancé en boucle serrée : délai maximal d'emblée, et message clair au journal.
-- **Arrêt** : fichier ``supervise.stop`` dans le même dossier (``deploy\\v3_agent.ps1 -Stop`` le crée), ou fin du
+- **Arrêt** : fichier ``supervise.stop`` dans le même dossier (``deploy\\pc_install.ps1 -Stop`` le crée), ou fin du
   processus. L'agent enfant est alors arrêté proprement.
 """
 

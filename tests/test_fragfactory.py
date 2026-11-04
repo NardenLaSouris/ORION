@@ -641,7 +641,7 @@ def test_an_offline_v3_agent_reads_as_frag_factory_unavailable(monkeypatch, tmp_
 def test_the_production_agent_template_has_no_frag_factory_section():
     text = (Path(__file__).resolve().parent.parent / "windows_agent.toml").read_text(encoding="utf-8")
     assert "[fragfactory]" not in text
-    v3 = (Path(__file__).resolve().parent.parent / "deploy" / "v3_agent.toml").read_text(encoding="utf-8")
+    v3 = (Path(__file__).resolve().parent.parent / "deploy" / "agent.toml").read_text(encoding="utf-8")
     assert "[fragfactory]" in v3 and 'token_name = "ORION_V3_AGENT_TOKEN"' in v3
 
 

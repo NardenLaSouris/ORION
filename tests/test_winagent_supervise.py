@@ -114,3 +114,29 @@ def test_real_child_process_is_restarted(tmp_path):
     supervisor._pause = lambda seconds: None  # noqa: SLF001 - pas d'attente réelle entre deux lancements
     supervisor.run(max_starts=3)
     assert marker.read_text() == "xxx"
+
+
+def test_the_reference_pc_install_is_the_single_v3_agent_with_audio_and_pc_tools(tmp_path, monkeypatch):
+    """deploy/agent.toml : le seul agent ORION du PC (V3) ; son propre jeton, jamais celui de la V2 ; audio et outils du
+    PC repris de l'ancien agent ; données hors du code (mises à jour sans perdre la liaison Discord)."""
+    from orion.winagent.config import load_agent_config
+
+    for name in ("ORION_AGENT_TOKEN", "JARVIS_AGENT_TOKEN", "ORION_V3_AGENT_TOKEN", "FRAGFACTORY_LINK_TOKEN",
+                 "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    env = tmp_path / ".env"
+    env.write_text("JARVIS_AGENT_TOKEN=" + "p" * 40 + "\nORION_V3_AGENT_TOKEN=" + "v" * 40 +
+                   "\nFRAGFACTORY_LINK_TOKEN=" + "f" * 40 + "\n", encoding="utf-8")
+    config = load_agent_config(ROOT / "deploy" / "agent.toml", env)
+    assert config.port == 8875 and config.token == "v" * 40 and config.allowed_ips == frozenset({"192.168.1.91"})
+    assert config.audio and config.pc_tools and config.face_port == 8865
+    assert config.discord["data_dir"] == Path("~/.orion/data").expanduser()
+
+
+def test_the_pc_installer_only_installs_v3_commits_and_checks_before_stopping_anything():
+    text = (ROOT / "deploy" / "pc_install.ps1").read_text(encoding="utf-8-sig")
+    assert "merge-base --is-ancestor $Sha origin/v3" in text
+    # contrôle des imports avant tout arrêt ; retour à la version précédente si le Core ne voit pas l'agent
+    assert text.index("Contrôle des imports") < text.index('Stop-Ours "agent"; Stop-Ours "control"\nif ($Current')
+    assert "retour à $Current" in text
+    assert not (ROOT / "deploy" / "v3_agent.ps1").exists()  # plus de lancement depuis une copie de travail

@@ -161,5 +161,5 @@ def main(argv: list[str] | None = None) -> int:
         bridge = Bridge(SettingsStore(folder), set_autostart)
     bridge.start()
     log.info("%s démarré (Core : %s)", title, bridge.settings.core_url)
-    ControlApp(bridge, args.hidden, title, hotkey=not args.profile).run()
+    ControlApp(bridge, args.hidden, title).run()  # V3 seule : son raccourci clavier aussi
     return 0

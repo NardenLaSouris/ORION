@@ -585,7 +585,7 @@ EXISTS = lambda name: name.startswith("discord_")  # noqa: E731
     ("ORION, rejoins le vocal Général.", "discord_join", {"salon": "general"}),
     ("rejoins le salon vocal Jeux vidéo sur le serveur Amis", "discord_join", {"salon": "jeux video",
                                                                               "serveur": "amis"}),
-    ("change de salon", "discord_join", {"salon": ""}),
+    ("change de salon", "discord_join", {}),
     ("mets-moi dans le vocal Jeux", "discord_join", {"salon": "jeux"}),
     ("ORION, mute-moi.", "discord_mute", {}),
     ("coupe mon micro", "discord_mute", {}),
@@ -743,3 +743,27 @@ def test_channels_where_orion_saw_you_are_remembered_across_restarts(tmp_path):
     again = DiscordEngine(agent, settings=settings, seen_path=tmp_path / "discord_seen.json")
     again.poll()
     assert again.act("join")["ok"] and agent.calls[-1][1]["channel_id"] == "1400000000000000001"
+
+def test_connect_me_in_voice_goes_through_the_tool_core_end_to_end():
+    """« Connecte moi en vocal » par message (4 novembre 2026, 13 h 55) : la phrase était comprise, mais le salon vide
+    était refusé à la vérification des paramètres (« Je n'ai pas bien compris ») ; l'essai direct du module, lui,
+    passait. Ici : phrase -> analyseur -> vérification -> outil -> salon habituel."""
+    from orion.discord.tools import discord_tools
+    from orion.tools.quick import quick_plan
+    from orion.tools.registry import ToolRegistry
+    from orion.tools.request import parse_request
+
+    agent = FakeAgent()
+    engine = DiscordEngine(agent, ledger=Ledger(), settings=DiscordSettings(default_salon="Jeux vidéo",
+                                                                            default_serveur="Amis"))
+    engine.poll()
+    registry = ToolRegistry()
+    for tool in discord_tools(engine):
+        registry.register(tool)
+    for text in ("Connecte moi en vocal", "connecte-moi en vocal sur discord"):
+        agent.remote["voice"] = None
+        engine.poll()  # état relu : plus dans un salon
+        call = quick_plan(text, registry)
+        request = parse_request(call, registry)
+        result = registry.get(request.tool).execute(dict(request.parameters))
+        assert result["text"] == "Vous avez rejoint Jeux vidéo sur Amis.", text

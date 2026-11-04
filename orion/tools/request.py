@@ -91,6 +91,8 @@ def parse_request(data: Any, registry: ToolRegistry) -> ToolRequest:
             if len(value) > spec.max_length:
                 log.info("Outil %s : « %s » trop long (%d caractères)", tool.name, name, len(value))
                 raise _invalid("C'est un peu long pour moi, monsieur : pouvez-vous le dire plus brièvement ?")
+            if not value and not spec.required:
+                continue  # facultatif laissé vide (« connecte-moi en vocal », salon non dit) : comme absent
             if not value or CONTROL.search(value):
                 log.info("Outil %s : « %s » vide ou illisible", tool.name, name)
                 raise _invalid("Je n'ai pas bien compris cette demande, monsieur.")

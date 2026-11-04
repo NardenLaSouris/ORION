@@ -116,6 +116,8 @@ peak_db = -1.0            # crête maximale
 # Mot = phonèmes espeak (IPA) imposés à Piper. espeak lit « Jarvis » /ʒaʁvˈi/
 # (s final muet, règle du français) : on impose /ʒaʁvˈis/ sans changer l'orthographe.
 Jarvis = "ʒaʁvˈis"
+# « Discord » lu comme « accord » (d final muet, « discor ») ; prononcé à l'anglaise, d final dit (« discorde »).
+Discord = "diskˈɔʁd"
 
 [tts.neutts]
 # Utilisé seulement avec engine = "neutts" (dépendances : requirements-neutts.txt).

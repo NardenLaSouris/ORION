@@ -144,3 +144,10 @@ def test_an_instruction_about_a_fixed_rule_domain_is_never_promised(tmp_path, ca
     assert "hors d'atteinte" in caplog.text and "salon" not in caplog.text  # le journal ne recopie pas la consigne
     address = tool.execute({"instruction": "appelle-moi monsieur"})
     assert address["domain"] == ""  # une consigne de style, pas un appel téléphonique
+
+def test_discord_is_pronounced_the_english_way():
+    """« Discord » était lu comme « accord » (d final muet) ; prononciation imposée : d final dit (4 novembre 2026)."""
+    from orion.config import load_config
+
+    cfg = load_config(Path(__file__).resolve().parent.parent / "config.toml", local=False)
+    assert cfg.tts.pronunciations["Discord"] == "diskˈɔʁd" and cfg.tts.pronunciations["Jarvis"] == "ʒaʁvˈis"

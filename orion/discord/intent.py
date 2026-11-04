@@ -109,6 +109,6 @@ def discord_plan(text: str, exists: Callable[[str], bool], deafened: Callable[[]
             rest, server = rest[:split.start()], _name(rest[split.end():])
         channel = _name(rest)
         if channel in ("", "moi", "toi") and not server:
-            return "discord_join", {"salon": ""}  # « rejoins le vocal » : ORION demande lequel
+            return "discord_join", {}  # « connecte-moi en vocal » : votre salon habituel, sinon ORION demande lequel
         return "discord_join", {"salon": channel, **({"serveur": server} if server else {})}
     return None

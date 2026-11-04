@@ -3,6 +3,7 @@
 numpy==2.5.3           # agent : audio
 sounddevice==0.5.6     # agent : micro et haut-parleurs
 psutil==7.2.2          # agent : applications ouvertes
+httpx==0.28.1          # agent : outils communs (météo) importés par le registre d'outils
 pywebview==6.2.1       # ORION Control : fenêtre native (WebView2)
 pystray==0.19.5        # ORION Control : icône dans la zone de notification
 pillow==12.3.0         # ORION Control : dessin de l'icône

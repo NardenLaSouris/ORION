@@ -18,6 +18,16 @@ function Count-Top([scriptblock]$Match) {
     $mine = @($All | Where-Object $Match)
     @($mine | Where-Object { $p = $_; -not ($mine | Where-Object { $_.ProcessId -eq $p.ParentProcessId }) }).Count
 }
+$Boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+Write-Host ("Dernier démarrage de Windows : {0:dd/MM/yyyy HH:mm}" -f $Boot)
+$Ours = @($All | Where-Object { $_.CommandLine -like "*\.orion\pc_start.pyw*" })
+if ($Ours) {
+    $First = ($Ours | Sort-Object CreationDate | Select-Object -First 1).CreationDate
+    $AtBoot = ($First - $Boot).TotalMinutes -lt 10
+    Write-Host ("Programmes ORION lancés le {0:dd/MM/yyyy HH:mm} : {1}" -f $First,
+        $(if ($AtBoot) { "au démarrage de session (démarrage automatique vérifié)" }
+          else { "après le démarrage (relancés à la main ou par une mise à jour : démarrage automatique NON vérifié)" }))
+}
 $Supervisors = Count-Top { $_.CommandLine -like "*pc_start.pyw*agent*" -or $_.CommandLine -like "*orion.winagent.supervise*" }
 $Agents = Count-Top { $_.CommandLine -like "*-m orion.winagent *" -and $_.CommandLine -notlike "*supervise*" }
 $Controls = Count-Top { $_.CommandLine -like "*pc_start.pyw*control*" -or $_.CommandLine -like "*orion.control*" -or $_.CommandLine -like "*jarvis.control*" }

@@ -53,6 +53,7 @@ unique et la relance après plantage (superviseur) sont conservés. Journal : `d
 | 11:09 | `v3_reference_root.sh` lancé par vous : règles réseau installées, ressources du Core principal, Core V2 arrêté et désactivé | V2 `inactive` / `disabled`, `/opt/orion` intact |
 | 11:12 | Transcription du Katana : jeton propre à la V3 (sur votre accord ; ancien gardé : `token.txt.v2-20261104`) | « STT : GPU distant http://192.168.1.73:8766 » ; large-v3 sur CUDA, 401 sans jeton |
 | 11:25 | Agent V2 du Katana retiré (sur votre accord ; `deploy/katana_retrait_agent_v2.ps1`) : processus arrêtés, raccourci « JARVIS Agent.lnk » retiré ; sauvegarde `C:\Users\theju\orion-retrait-agent-v2` (configuration, jeton, raccourci) ; dossier `C:\Users\theju\jarvis` intact | plus rien sur 8765 ; transcription seule (une instance, tâche « ORION Transcription »), jeton V3 accepté, 401 sans jeton ; client du Core V3 : transcription réelle passée par le GPU (`last_source = gpu`) |
+| 11:35 | MISSIONS M1 déployé (`e5eb29c`, 2484 tests réussis) et activé dans la V3 (`[missions] enabled`, ancienne configuration `config.local.toml.avant-missions-*`) | module actif, verrouillé sans la clé F4 ; contrôle du PC toujours conforme |
 | 11:00 | Copies de travail `orion-v3-agent` et `orion-fragfactory` retirées (propres, intégrées à `v3`, inutilisées ; branches gardées) | — |
 
 Refusé par le contrôle de sécurité automatique de la session (non contourné) : rotation du jeton de transcription du

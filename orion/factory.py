@@ -25,6 +25,13 @@ from orion.interfaces import (
 
 log = logging.getLogger(__name__)
 
+
+def agent_token() -> str:
+    """Jeton des appels du Core vers les agents Windows (audio, outils du PC, musique, fond d'écran) : celui de l'agent
+    V3, ``ORION_V3_AGENT_TOKEN`` (un seul jeton d'agent) ; ``ORION_AGENT_TOKEN`` (configurations d'avant la V3) à
+    défaut. L'API d'administration garde ``ORION_AGENT_TOKEN`` : c'est le jeton d'ORION Control."""
+    return secret("ORION_V3_AGENT_TOKEN", ENV_FILE) or secret("ORION_AGENT_TOKEN", ENV_FILE)
+
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
@@ -450,7 +457,7 @@ def build_music_relay(cfg: Config):
         return None
     from orion.audio.music import MusicRelay
 
-    relay = MusicRelay(cfg.spotify.pipe, cfg.audio.remote, secret("ORION_AGENT_TOKEN", ENV_FILE), cfg.spotify.duck_percent)
+    relay = MusicRelay(cfg.spotify.pipe, cfg.audio.remote, agent_token(), cfg.spotify.duck_percent)
     try:
         relay.start()
     except OSError as exc:
@@ -708,7 +715,7 @@ def build_tools(cfg: Config, personality, events: EventBus | None = None, timers
         from orion.tools.builtin import PC_TOOLS
         from orion.tools.devices import AgentClient, remote_tool
 
-        client = AgentClient(secret("ORION_AGENT_TOKEN", ENV_FILE), timeout=max(1.0, cfg.tools.timeout - 2))
+        client = AgentClient(agent_token(), timeout=max(1.0, cfg.tools.timeout - 2))
         tools = [remote_tool(tool, devices, client) if tool.name in PC_TOOLS else tool for tool in tools]
         if any(devices[key].mac for key in devices.keys()):  # allumage par le réseau, envoyé par le Core
             from orion.tools.power import wake_tool
@@ -777,7 +784,7 @@ def build_source(cfg: Config) -> AudioSource:
     if a.remote:
         from orion.audio.network import NetworkSource
 
-        return NetworkSource(a.remote, secret("ORION_AGENT_TOKEN", ENV_FILE), a.sample_rate, a.frame_samples)
+        return NetworkSource(a.remote, agent_token(), a.sample_rate, a.frame_samples)
     from orion.audio.devices import MicrophoneSource
 
     return MicrophoneSource(a.sample_rate, a.frame_samples, a.input_device)
@@ -797,7 +804,7 @@ def build_sink(cfg: Config) -> AudioSink:
     if cfg.audio.remote:
         from orion.audio.network import NetworkSink
 
-        return NetworkSink(cfg.audio.remote, secret("ORION_AGENT_TOKEN", ENV_FILE))
+        return NetworkSink(cfg.audio.remote, agent_token())
     from orion.audio.devices import SpeakerSink
 
     return SpeakerSink(cfg.audio.output_device)
@@ -1052,10 +1059,10 @@ def build_agent(
         from orion.diagnostics import diagnostic_tool
 
         agents = None
-        if devices is not None and secret("ORION_AGENT_TOKEN", ENV_FILE):
+        if devices is not None and agent_token():
             from orion.tools.devices import AgentClient
 
-            agents = AgentClient(secret("ORION_AGENT_TOKEN", ENV_FILE), timeout=12.0)
+            agents = AgentClient(agent_token(), timeout=12.0)
         # « Lance un diagnostic » : appareils en ligne, applications ouvertes, lumières, iPhone ; lecture seule.
         extra.append(diagnostic_tool(cfg, devices, agents, presence, rooms, driver))
     call_rules = None
@@ -1235,10 +1242,10 @@ def build_agent(
                  call_rules=call_rules if calls is not None else None, inbox=wallpaper_inbox)
     if cfg.wallpaper.enabled:
         wallpaper_agents = None
-        if devices is not None and secret("ORION_AGENT_TOKEN", ENV_FILE):
+        if devices is not None and agent_token():
             from orion.tools.devices import AgentClient
 
-            wallpaper_agents = AgentClient(secret("ORION_AGENT_TOKEN", ENV_FILE), timeout=4.0)
+            wallpaper_agents = AgentClient(agent_token(), timeout=4.0)
         wallpaper = build_wallpaper(cfg, llm=llm, stt=stt, devices=devices, presence=presence, weather=weather,
                         calendar=calendar, timers=timers, rooms=rooms, driver=driver, spotify=spotify,
                         watcher=watcher, agents=wallpaper_agents,

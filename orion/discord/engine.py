@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import unicodedata
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -197,7 +198,7 @@ class DiscordEngine(BaseModule):
         if action == "leave":
             before = (self._remote or {}).get("voice")
             self._apply(self._agent.call("discord_leave"))
-            return f"J'ai quitté le salon {before['channel']}." if before else "Vous n'étiez dans aucun salon vocal."
+            return f"J'ai quitté le salon {spoken(before['channel'])}." if before else "Vous n'étiez dans aucun salon vocal."
         if action == "join":
             return self._join(salon, serveur, channel_id)
         if action == "link":
@@ -219,12 +220,12 @@ class DiscordEngine(BaseModule):
             guild, channel = self.resolve(salon, serveur)
         current = (self._remote or {}).get("voice") or {}
         if current.get("channel_id") == channel["id"]:
-            return f"Vous êtes déjà dans {channel['name']}."
+            return f"Vous êtes déjà dans {spoken(channel['name'])}."
         # Rejoindre un salon nommé est une demande explicite : quitter le salon actuel en fait partie (force).
         self._apply(self._agent.call("discord_join", {"channel_id": channel["id"], "force": bool(current)},
                                      timeout=20))
-        where = f" sur {guild['name']}" if guild["name"] else ""
-        return f"Vous avez rejoint {channel['name']}{where}."
+        where = f" sur {spoken(guild['name'])}" if guild["name"] else ""
+        return f"Vous avez rejoint {spoken(channel['name'])}{where}."
 
     def directory(self, refresh: bool = False) -> list[dict]:
         cached = self._directory
@@ -240,13 +241,13 @@ class DiscordEngine(BaseModule):
         wanted, place = normalize(salon), normalize(serveur)
         guilds = self.directory()
         if place:
-            guilds = [g for g in guilds if _matches(normalize(g["name"]), place)] or []
+            guilds = [g for g in guilds if _matches(label(g["name"]), place)] or []
             if not guilds:
                 raise DiscordUnavailable("guild_not_found", f"Je ne trouve pas le serveur « {serveur} ».")
         found: list[tuple[int, dict, dict]] = []
         for guild in guilds:
             for channel in guild.get("channels", []):
-                name = normalize(channel["name"])
+                name = label(channel["name"])
                 score = 3 if name == wanted else 2 if _matches(name, wanted) else 0
                 if score:
                     found.append((score, guild, channel))
@@ -258,8 +259,8 @@ class DiscordEngine(BaseModule):
         if len(found) > 1 and current:
             found = [(g, c) for g, c in found if g["id"] == current] or found
         if len(found) > 1:
-            places = sorted({g["name"] for g, _ in found})
-            raise DiscordUnavailable("channel_ambiguous", f"Plusieurs salons « {found[0][1]['name']} » : sur "
+            places = sorted({spoken(g["name"]) for g, _ in found})
+            raise DiscordUnavailable("channel_ambiguous", f"Plusieurs salons « {spoken(found[0][1]['name'])} » : sur "
                                      + " ou sur ".join(places[:3]) + " ?")
         return found[0]
 
@@ -317,8 +318,8 @@ class DiscordEngine(BaseModule):
         micro = "en sourdine" if state["deaf"] else "micro coupé" if state["mute"] else "micro ouvert"
         if not voice:
             return f"Vous n'êtes dans aucun salon vocal ; {micro}."
-        where = f" sur {voice['guild']}" if voice.get("guild") else ""
-        return f"Vous êtes dans {voice['channel']}{where}, {micro}."
+        where = f" sur {spoken(voice['guild'])}" if voice.get("guild") else ""
+        return f"Vous êtes dans {spoken(voice['channel'])}{where}, {micro}."
 
     def participants(self) -> str:
         state = self.state()
@@ -327,14 +328,14 @@ class DiscordEngine(BaseModule):
         voice = state["voice"]
         if not voice:
             return "Vous n'êtes dans aucun salon vocal."
-        me = normalize(state["user"] or "")
-        others = [p["name"] for p in voice.get("participants", []) if normalize(p["name"]) != me]
+        me = label(state["user"] or "")
+        others = [spoken(p["name"]) for p in voice.get("participants", []) if label(p["name"]) != me]
         if not others:
-            return f"Vous êtes seul dans {voice['channel']}."
+            return f"Vous êtes seul dans {spoken(voice['channel'])}."
         names = others[:8]
         listed = ", ".join(names[:-1]) + " et " + names[-1] if len(names) > 1 else names[0]
         extra = f" et {len(others) - 8} autres" if len(others) > 8 else ""
-        return f"Dans {voice['channel']}, avec vous : {listed}{extra}."
+        return f"Dans {spoken(voice['channel'])}, avec vous : {listed}{extra}."
 
     # --- ORION Control ----------------------------------------------------------------------------------------
 
@@ -357,6 +358,20 @@ class DiscordEngine(BaseModule):
             return 200, self.act(parts[0], "admin", decided=False, salon=salon[:100], serveur=serveur[:100],
                                  channel_id=channel_id)
         return NOT_FOUND
+
+
+def label(name: str) -> str:
+    """Nom Discord comparable à ce qui est dit : les lettres stylisées (« 𝐒𝐤𝐚𝐥𝐢 », « 𝗖𝗵𝗶𝗹𝗹 », pleine chasse) redeviennent
+    des lettres ordinaires avant la normalisation habituelle (accents, casse, emojis)."""
+    return normalize(unicodedata.normalize("NFKC", name or ""))
+
+
+def spoken(name: str) -> str:
+    """Nom Discord prononçable : lettres stylisées ramenées aux lettres ordinaires, emojis et ornements (« 🕐┃ »)
+    retirés ; le nom brut si rien ne reste."""
+    text = unicodedata.normalize("NFKC", name or "")
+    kept = "".join(c if unicodedata.category(c)[0] in "LNZ" or c in "'’-&+.,!?" else " " for c in text)
+    return " ".join(kept.split()) or (name or "").strip()
 
 
 def _matches(name: str, wanted: str) -> bool:

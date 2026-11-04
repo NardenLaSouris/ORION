@@ -452,15 +452,34 @@ def test_join_by_spoken_name_accents_emojis_and_server_preference():
     assert engine.act("join", salon="Général")["ok"] is False  # « général » existe sur deux serveurs
     assert "Amis" in engine.act("join", salon="Général")["text"] and agent.remote["voice"] is None
     result = engine.act("join", salon="general", serveur="amis")
-    assert result["ok"] and result["text"] == "Vous avez rejoint 🔊 Général sur Amis 🎮."
+    assert result["ok"] and result["text"] == "Vous avez rejoint Général sur Amis."  # dit sans emojis
     assert agent.calls[-1] == ("discord_join", {"channel_id": GENERAL, "force": False})
     assert engine.act("join", salon="jeux")["ok"]  # nom partiel ; changement de salon demandé : force
     assert agent.calls[-1] == ("discord_join", {"channel_id": JEUX, "force": True})
-    assert engine.act("join", salon="général")["text"].startswith("Vous avez rejoint 🔊 Général")  # serveur actuel
-    assert engine.act("join", salon="Général")["text"] == "Vous êtes déjà dans 🔊 Général."
+    assert engine.act("join", salon="général")["text"].startswith("Vous avez rejoint Général")  # serveur actuel
+    assert engine.act("join", salon="Général")["text"] == "Vous êtes déjà dans Général."
     assert engine.act("join", salon="cuisine")["text"] == "Je ne trouve pas de salon vocal « cuisine »."
     assert engine.act("join")["text"] == "Quel salon vocal voulez-vous rejoindre ?"
     assert ("user", "CONTROL_DEVICE", "discord.join", "allow", "exécutée") in ledger.rows
+
+
+def test_stylised_discord_names_are_recognised_when_spoken_and_said_without_ornaments():
+    """Noms relevés sur le vrai Discord le 4 novembre : lettres mathématiques grasses, emojis, séparateurs."""
+    agent = FakeAgent()
+    agent.guilds = [{"id": "780814027176935424", "name": "La Taverne d'Odin", "channels": [
+        {"id": "1149744683925372928", "name": "🕐┃𝐀𝐭𝐭𝐞𝐧𝐭𝐞"},
+        {"id": "1149744681538814033", "name": "🍻┃𝐒𝐤𝐚𝐥𝐢"},
+        {"id": "1149744677650710578", "name": "🗿┃𝐄𝐧𝐭𝐫𝐞𝐭𝐢𝐞𝐧 #𝟏"}]},
+        {"id": "812111919943123004", "name": "The Hunter Fishing planet", "channels": [
+            {"id": "1390061034047541288", "name": "🔊𝗖𝗵𝗶𝗹𝗹🔊"}]}]
+    engine, agent, _ = engine_with(agent)
+    result = engine.act("join", salon="attente", serveur="taverne")
+    assert result["ok"] and result["text"] == "Vous avez rejoint Attente sur La Taverne d'Odin."
+    assert agent.calls[-1][1]["channel_id"] == "1149744683925372928"
+    assert engine.act("join", salon="Skali")["text"] == "Vous avez rejoint Skali sur La Taverne d'Odin."
+    assert engine.act("join", salon="entretien 1")["ok"]
+    assert engine.act("join", salon="chill")["text"] == "Vous avez rejoint Chill sur The Hunter Fishing planet."
+    assert "Chill" in engine.summary() and "🔊" not in engine.summary()
 
 
 def test_mute_and_deafen_are_explicit_and_undeafen_keeps_the_mic_closed():
@@ -537,7 +556,7 @@ def test_status_and_participants_sentences():
     assert engine.summary() == "Vous n'êtes dans aucun salon vocal ; micro ouvert."
     engine.act("join", salon="jeux")
     engine.act("mute")
-    assert engine.summary() == "Vous êtes dans Jeux vidéo sur Amis 🎮, micro coupé."
+    assert engine.summary() == "Vous êtes dans Jeux vidéo sur Amis, micro coupé."
     assert engine.participants() == "Dans Jeux vidéo, avec vous : Alice."
     engine.act("leave")
     assert engine.participants() == "Vous n'êtes dans aucun salon vocal."

@@ -149,8 +149,8 @@ Couper : `v3_claude_code_setup.sh --desactiver` ; effacer le jeton : `--oublier`
 ## Mode autonome (`autopilot.py`)
 
 Demandé par le propriétaire le 4 novembre 2026 : ORION interroge Claude Code d'elle-même quand elle ne comprend pas une
-demande, et pour ses propres propositions ; Claude Code juge et réalise ; ce qui est sûr est déployé sur le Core sans
-attendre, le reste vous est envoyé.
+demande, et pour ses propres propositions ; Claude Code juge et prépare. Révisé le même jour (feuille de route de
+stabilisation, phase 2) : **aucun déploiement sans l'intervention et l'approbation du propriétaire**.
 
 1. **Repérage** : chaque réponse d'ORION qui avoue ne pas avoir compris (« je n'ai pas compris », « je ne sais pas
    encore faire »…) met la demande de côté (3 mots au moins, une fois par semaine pour la même). Les propositions
@@ -161,34 +161,56 @@ attendre, le reste vous est envoyé.
 3. **Jugement** :
    - dangereux : rien n'est fait, vous êtes prévenu ;
    - à valider, ou risque moyen ou élevé : proposition en file d'attente, vous êtes prévenu ;
-   - corrigé, sans risque : règles d'ORION (aucun fichier sensible : plateforme, permissions, confirmations, appels,
-     mails, achats, connaissances, configuration, EVOLVE, déploiement ; au plus 8 fichiers et 400 lignes ; aucun test
-     supprimé ni affaibli ; un test ajouté ; ni migration de base, ni commande système), compilation, tests, sécurité,
-     commit, puis demande de déploiement. Un écart à ces règles : à valider.
-4. **Déploiement**, hors d'ORION : `orion-v3-evolve.path` voit la demande et lance `deploy/v3_evolve_runner.sh` sous le
-   compte user. Il récupère la branche dans `~/orion-dev` (`v3-evolve`), refait les contrôles de son côté
-   (`deploy/v3_evolve_gate.py`, copie déployée, qu'EVOLVE ne peut pas modifier ; au plus 3 déploiements par 24 heures),
-   repasse la suite complète des tests sur ce commit, puis lance `deploy/v3_deploy.sh v3-evolve` (sauvegarde, avance
-   rapide, contrôle de santé, retour automatique à la version précédente en cas d'échec).
-5. **Retour** : ORION lit le résultat et vous l'écrit (jamais à voix haute, jamais d'appel). « Revenir en arrière »
-   dans ORION Control annule un changement déployé par un commit d'annulation (`git revert`), déployé de la même façon.
+   - corrigé, sans risque : règles d'ORION (aucun fichier sensible : plateforme et permissions F1, arrêt d'urgence,
+     confirmations, appels, mails, achats, connaissances, accès aux machines, configuration, assemblage
+     `orion/factory.py`, EVOLVE, déploiement ; au plus 8 fichiers et 400 lignes ; aucun test supprimé ni affaibli ; un
+     test ajouté ; ni migration de base, ni commande système), compilation, tests, sécurité, commit sur la branche,
+     puis **« attend votre accord »** (alerte écrite). Un écart à ces règles : à valider.
+4. **Votre accord** (ORION Control, vue « Évolution ») : « Approuver » montre le résumé et les fichiers et, après
+   confirmation, prépare la demande (`data/evolve/deploy/request.json`, `approved_by = utilisateur`) ; « Refuser »
+   abandonne le changement (aussi après « Approuver », tant que le déploiement n'est pas lancé). Refusé si le Core a
+   changé depuis la préparation, si une demande attend déjà, ou au-delà de 3 déploiements par 24 heures. ORION ne peut
+   pas s'approuver elle-même (`approve(…, "evolve")` : refus).
+5. **Déploiement, lancé par vous** dans un terminal :
+
+   ```bash
+   ssh -t user@192.168.1.91 "bash /opt/orion-v3/deploy/v3_evolve_runner.sh"
+   ```
+
+   Sans terminal, l'exécutant ne fait rien (aucun déclenchement automatique : `deploy/v3_evolve_root.sh` retire
+   l'ancien `orion-v3-evolve.path`). Il refuse une demande sans votre accord, récupère la branche dans `~/orion-dev`
+   (`v3-evolve`), refait les contrôles de son côté (`deploy/v3_evolve_gate.py`, copie déployée, qu'EVOLVE ne peut pas
+   modifier), **montre le changement et attend « oui »** (sinon la demande reste en attente), repasse la suite complète
+   des tests sur ce commit, puis lance `deploy/v3_deploy.sh v3-evolve` (sauvegarde, avance rapide, contrôle de santé,
+   retour automatique à la version précédente en cas d'échec).
+6. **Retour** : ORION lit le résultat et vous l'écrit (jamais à voix haute, jamais d'appel). « Revenir en arrière »
+   dans ORION Control prépare l'annulation d'un changement déployé (commit d'annulation `git revert`), lancée par vous
+   avec la même commande, qui demande aussi « oui ».
 
 Interrupteur : ORION Control, vue « Évolution » (« Activer » / « Couper le mode autonome »), niveau 2 exigé ; le moteur
-des permissions (autonomie suspendue) l'arrête aussi. Le niveau 3 (fusion et déploiement par ORION) reste refusé :
-ORION dépose une demande, c'est le service du compte user qui juge et déploie.
+des permissions (autonomie suspendue, autorisation bornée CODE_CHANGE) l'arrête aussi. Le niveau 3 (fusion et
+déploiement par ORION) reste refusé.
 
-Installation du service (une fois) :
+Retrait du déclencheur automatique (une fois, avec sudo) :
 
 ```bash
 ssh -t user@192.168.1.91 "sudo bash /home/user/orion-v3/deploy/v3_evolve_root.sh"
 ```
 
-Journal du service : `~/sauvegardes/orion-v3/evolve.log` ; `journalctl -u orion-v3-evolve`. Les commits d'EVOLVE
-arrivent dans `~/orion-dev`, branche `v3-evolve` : le poste de développement les reprend avant chaque déploiement.
+Journal : `~/sauvegardes/orion-v3/evolve.log`. Les commits d'EVOLVE arrivent dans `~/orion-dev`, branche `v3-evolve` :
+le poste de développement les reprend avant chaque déploiement.
+
+**Composants qu'EVOLVE ne modifie jamais seul** (contrôle indépendant `FORBIDDEN` du Core, et `policy.PROTECTED` /
+`AUTO_PROTECTED` côté ORION) : moteur des permissions F1 et autonomie (`orion/platform/**`), arrêt d'urgence
+(`orion/platform/autonomy.py`), clés et secrets F4 (`orion/foundation/**`, `*secret*`, `*token*`, `.env*`),
+validation des actions (`orion/tools/confirmation.py`, `orion/tools/core.py`, `orion/llm/guard.py`), déploiement et
+retour arrière (`deploy/**`, `scripts/v3_*`, `orion/evolve/**`), accès aux machines (`orion/winagent/**`,
+`orion/platform/agentlink.py`, `orion/fragfactory/__init__.py`), assemblage (`orion/factory.py`), actions reçues du
+réseau (`orion/api*`, `orion/wallpaper/server.py`). Un changement qui en touche un est envoyé à vous, jamais déployé.
 
 Risque résiduel : les demandes incomprises (ce que vous avez dit ou écrit) partent chez Claude Code, après masquage
 des adresses et numéros. Un changement jugé sans risque peut tout de même dégrader un comportement que les tests ne
-couvrent pas : le retour arrière est alors à demander dans ORION Control.
+couvrent pas : le retour arrière est alors à demander dans ORION Control, puis à lancer par vous.
 
 ## Interfaces
 

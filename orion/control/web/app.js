@@ -721,14 +721,17 @@
           button("Niveau 2 (développeur)", () => confirm("Autoriser EVOLVE à préparer des correctifs (branches, tests, commits) dans son espace isolé ?")
             && act(mod("evolve", "/level", "PUT", { level: 2 }), "Niveau 2.").then(refresh))),
         el("div", {}, auto ? el("h2", {}, "Mode autonome") : null,
-        auto ? el("p", { class: "small" }, "Demandes incomprises et propositions d'ORION jugées et réalisées par Claude Code ; "
-          + "déployées seules si sans risque (service orion-v3-evolve : contrôle, tests, retour automatique), sinon envoyées à vous.") : null,
+        auto ? el("p", { class: "small" }, "Demandes incomprises et propositions d'ORION jugées et préparées par Claude Code "
+          + "(branche, test, vérifications). Rien n'est déployé sans vous : « Approuver » prépare la demande, puis vous lancez "
+          + "le déploiement sur le Core dans un terminal (contrôle indépendant, tests, « oui », retour automatique).") : null,
         auto ? cards([["État", auto.actif ? (auto["prêt"] ? "actif" : "en pause") : "coupé", auto.raison || "prêt"],
           ["Incomprises en attente", auto.incomprises_en_attente],
-          ["Déploiements (24 h)", `${auto["déploiements_24h"]} / ${auto["déploiements_max"]}`, auto["en_déploiement"] ? "déploiement en cours" : ""]]) : null,
+          ["Attendent votre accord", auto.en_attente_accord || 0],
+          ["Déploiements (24 h)", `${auto["déploiements_24h"]} / ${auto["déploiements_max"]}`, auto["en_déploiement"] ? "demande prête : à lancer par vous sur le Core" : ""]]) : null,
+        auto && auto["en_déploiement"] ? el("p", { class: "small" }, "À lancer par vous, dans un terminal : ", el("code", {}, auto.commande)) : null,
         auto ? el("div", { class: "toolbar" },
           auto.actif ? button("Couper le mode autonome", () => act(mod("evolve", "/auto", "PUT", { enabled: false }), "Mode autonome coupé.").then(refresh), "danger")
-            : button("Activer le mode autonome", () => confirm("ORION modifiera et déploiera seule les améliorations jugées sans risque par Claude Code (retour arrière possible). Activer ?")
+            : button("Activer le mode autonome", () => confirm("ORION fera préparer par Claude Code les améliorations jugées sans risque ; aucune ne sera déployée sans votre accord. Activer ?")
               && act(mod("evolve", "/auto", "PUT", { enabled: true }), "Mode autonome activé.").then(refresh), "primary"),
           button("Examiner maintenant", () => act(mod("evolve", "/auto/cycle", "POST"), "Examen fait.").then(refresh)),
           button("Autoriser EVOLVE à modifier son code (30 jours, 3 par jour)", () => confirm("Accorder à EVOLVE la modification de son code dans son espace isolé, au plus 3 fois par jour, pendant 30 jours ? (révocable dans « Autonomie »)")
@@ -736,8 +739,15 @@
               "Autorisation accordée.").then(refresh))) : null,
         auto ? table(["Heure", "Type", "État", "Résumé", "Action"], auto.actions.slice(0, 40).map((a) => [stamp(a.at), a.kind, a.state,
           a.data.summary || a.data.request || a.data.title || "—",
-          a.state === "déployée" ? button("Revenir en arrière", () => confirm("Annuler ce changement sur le Core ?")
-            && act(mod("evolve", `/auto/${a.id}/rollback`, "POST"), "Retour arrière demandé.").then(refresh), "danger") : "—"])) : null),
+          a.state === "déployée" ? button("Revenir en arrière", () => confirm("Annuler ce changement sur le Core ? (vous lancerez ensuite le retour dans un terminal)")
+            && act(mod("evolve", `/auto/${a.id}/rollback`, "POST"), `Retour arrière préparé ; à lancer : ${auto.commande}`).then(refresh), "danger")
+          : a.state === "attend votre accord" ? el("div", { class: "row" },
+            button("Approuver", () => confirm(`Approuver ce changement ?\n\n${a.data.summary || ""}\nFichiers : ${(a.data.files || []).join(", ")}\n\nVous lancerez ensuite le déploiement sur le Core.`)
+              && act(mod("evolve", `/auto/${a.id}/approve`, "POST"), `Approuvé ; à lancer : ${auto.commande}`).then(refresh), "primary"),
+            button("Refuser", () => confirm("Abandonner ce changement ?")
+              && act(mod("evolve", `/auto/${a.id}/refuse`, "POST"), "Changement abandonné.").then(refresh), "danger"))
+          : a.state === "approuvée, à lancer sur le Core" ? button("Refuser", () => confirm("Retirer la demande avant son lancement ?")
+              && act(mod("evolve", `/auto/${a.id}/refuse`, "POST"), "Demande retirée.").then(refresh), "danger") : "—"])) : null),
         el("h2", {}, "Anomalies"),
         table(["Type", "Titre", "Occurrences", "Dernière", "Actions"], anomalies.map((a) => [a.kind, a.title, String(a.count),
           stamp(a.last_at), el("div", { class: "row" }, button("Diagnostic", () => diagnose(a.signature)),

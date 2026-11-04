@@ -7,13 +7,15 @@
    « dangereux », avec un niveau de risque.
 3. Dangereux : rien n'est fait, vous êtes prévenu. À valider (ou risque moyen ou élevé) : proposition en file
    d'attente, vous êtes prévenu. Corrigé et sans risque : règles d'ORION (fichiers sensibles jamais, taille limitée,
-   aucun test supprimé ni affaibli, test ajouté), vérifications (compilation, tests, sécurité), commit, puis demande de
-   déploiement.
-4. Le déploiement n'est jamais fait par ORION : le service orion-v3-evolve (compte user, deploy/v3_evolve_runner.sh)
-   revérifie tout de son côté (deploy/v3_evolve_gate.py), refait passer la suite complète, puis déploie
-   (deploy/v3_deploy.sh : sauvegarde, avance rapide, santé, retour automatique à la version précédente sinon).
-   Vous êtes prévenu de chaque déploiement ; « Revenir en arrière » dans ORION Control le défait.
-Interrupteur : ORION Control (vue « Évolution ») ou [evolve] autonomous ; niveau 2 exigé.
+   aucun test supprimé ni affaibli, test ajouté), vérifications (compilation, tests, sécurité), commit sur une branche
+   du clone, puis « attend votre accord » : rien n'est déployé.
+4. Votre accord (feuille de route du 4 novembre 2026 : « un déploiement n'est possible qu'après mon intervention et
+   mon approbation ») : « Approuver » dans ORION Control (vous seul) prépare la demande ; le déploiement lui-même est
+   lancé par vous sur le Core (bash /opt/orion-v3/deploy/v3_evolve_runner.sh, dans un terminal : il montre le
+   changement et attend « oui »). Il revérifie tout de son côté (deploy/v3_evolve_gate.py), refait passer la suite
+   complète, puis déploie (deploy/v3_deploy.sh : sauvegarde, avance rapide, santé, retour automatique sinon).
+   « Refuser » abandonne le changement ; « Revenir en arrière » le défait (même lancement par vous).
+Interrupteur : ORION Control (vue « Évolution ») ou [evolve] autonomous ; niveau 2 exigé. Coupé, ORION n'examine rien.
 """
 
 from __future__ import annotations
@@ -52,6 +54,8 @@ AUTO_PROTECTED = (
     "orion/tools/request.py", "orion/tools/confirmation.py", "orion/llm/guard.py", "orion/config.py",
     "orion/api*.py", "orion/*security*", "orion/**/*security*", "orion/**/*permission*", "config.toml",
     "policies/*", "policies/**", "scripts/v3_*",
+    # assemblage des modules et des permissions, actions reçues par le réseau, jeton de liaison de Frag Factory
+    "orion/factory.py", "orion/wallpaper/server.py", "orion/fragfactory/__init__.py",
 )
 MAX_FILES, MAX_LINES = 8, 400
 # Lignes ajoutées que le service de déploiement refuse (copie de deploy/v3_evolve_gate.py) : envoyées à vous d'abord.
@@ -91,6 +95,9 @@ PROPOSAL_TASK = ("Juge cette proposition d'amélioration faite par ORION elle-m�
 WORKING, NOTHING, TO_VALIDATE, DANGEROUS = "en cours", "rien à faire", "à valider", "dangereuse"
 CHECKS_FAILED, DEPLOYING, DEPLOYED, DEPLOY_FAILED = "vérifications en échec", "en déploiement", "déployée", "refusée au déploiement"
 ROLLING_BACK, ROLLED_BACK = "retour arrière demandé", "revenue en arrière"
+AWAITING, APPROVED, REFUSED = "attend votre accord", "approuvée, à lancer sur le Core", "refusée par vous"
+# Commande du déploiement, lancée par vous seul (un terminal : le service refuse de tourner sans vous).
+RUN_COMMAND = 'ssh -t user@192.168.1.91 "bash /opt/orion-v3/deploy/v3_evolve_runner.sh"'
 PENDING_MISUNDERSTOOD = "à examiner"
 DAY = 86_400.0
 
@@ -289,13 +296,10 @@ class AutoPilot:
         commit = workspace.commit(f"EVOLVE autonome : {verdict['summary'][:200]}\n\n{verdict['reason'][:1500]}\n\n"
                                   f"Action {action} ({kind}), jugée par Claude Code : risque {verdict['risk']}.",
                                   report)
-        if self._deploys_today() >= self.settings.deploys_per_day:
-            self._tell("Amélioration prête, déploiement reporté", f"{verdict['summary']} (limite de "
-                       f"{self.settings.deploys_per_day} déploiements par jour) : à valider dans ORION Control.", action)
-            return self._to_validate(action, branch, {**data, "commit": commit}, changed,
-                                     ["limite de déploiements atteinte"], keep_branch=True)
-        self._request({"id": action, "kind": "deploy", "commit": commit, "branch": branch, "base": before})
-        return self._finish(action, DEPLOYING, {**data, "commit": commit, "before": before})
+        # Jamais de déploiement sans vous : le changement attend votre accord dans ORION Control.
+        self._tell("Amélioration prête : votre accord", f"{verdict['summary']} — ORION Control, vue « Évolution » : "
+                   "« Approuver » ou « Refuser ». Rien n'est déployé sans vous.", action)
+        return self._finish(action, AWAITING, {**data, "commit": commit, "before": before, "branch": branch})
 
     def _weakened(self, changed: list[str], deleted: list[str]) -> list[str]:
         """Tests existants dont des lignes disparaissent (un test qu'on affaiblit pour qu'il passe)."""
@@ -352,7 +356,7 @@ class AutoPilot:
     def _deploys_today(self) -> int:
         return sum(1 for r in self._store.query("SELECT state, data FROM evolve_auto WHERE at > ?",
                                                 (self._clock() - DAY,))
-                   if r["state"] in (DEPLOYING, DEPLOYED, ROLLING_BACK, ROLLED_BACK))
+                   if r["state"] in (APPROVED, DEPLOYING, DEPLOYED, ROLLING_BACK, ROLLED_BACK))
 
     def collect(self) -> int:
         """Lit le résultat du service de déploiement et vous prévient."""
@@ -382,6 +386,56 @@ class AutoPilot:
         self._update(row["id"], state, {"deploy": result})
         return 1
 
+    def approve(self, action: str, by: str) -> dict:
+        """Votre accord pour un changement prêt : la demande est préparée, le déploiement reste lancé par vous."""
+        if by != "utilisateur":
+            raise PolicyError("seul l'utilisateur approuve un déploiement")
+        row = self._store.one("SELECT * FROM evolve_auto WHERE id = ?", (action,))
+        if row is None:
+            raise KeyError(action)
+        data = loads(row["data"], {})
+        if row["state"] != AWAITING or not data.get("commit") or not data.get("branch"):
+            raise ValueError(f"rien à approuver (état : {row['state']})")
+        if self._in_flight():
+            raise ValueError("une demande attend déjà d'être lancée sur le Core")
+        if self._deploys_today() >= self.settings.deploys_per_day:
+            raise ValueError(f"limite de {self.settings.deploys_per_day} déploiements par jour atteinte")
+        if data.get("before") != self._deployed_head():
+            raise ValueError("le Core a changé depuis la préparation : changement à refaire")
+        self._request({"id": action, "kind": "deploy", "commit": data["commit"], "branch": data["branch"],
+                       "base": data["before"], "approved_by": by, "approved_at": self._clock(),
+                       "summary": str(data.get("summary", ""))[:300], "files": data.get("files", [])[:20]})
+        self._update(action, APPROVED, {"approved_at": self._clock()})
+        self.engine._history.record("evolve", action, "déploiement approuvé", {"par": by})
+        return {**self.action(action), "commande": RUN_COMMAND}
+
+    def refuse(self, action: str, by: str) -> dict:
+        """Vous refusez un changement prêt (ou approuvé mais pas encore lancé) : il est abandonné."""
+        if by != "utilisateur":
+            raise PolicyError("seul l'utilisateur refuse un changement")
+        row = self._store.one("SELECT * FROM evolve_auto WHERE id = ?", (action,))
+        if row is None:
+            raise KeyError(action)
+        if row["state"] not in (AWAITING, APPROVED):
+            raise ValueError(f"rien à refuser (état : {row['state']})")
+        request = Path(self.settings.request_dir) / "request.json"
+        if row["state"] == APPROVED:
+            try:
+                pending = json.loads(request.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise ValueError("le déploiement a déjà été lancé sur le Core") from None
+            if pending.get("id") == action:
+                request.unlink(missing_ok=True)
+        branch = loads(row["data"], {}).get("branch")
+        if branch and self.engine.workspace is not None:
+            try:
+                self.engine.workspace.discard(branch)
+            except Exception:  # noqa: BLE001 - le refus vaut même si le clone a déjà oublié la branche
+                log.exception("EVOLVE autonome : branche %s non retirée", branch)
+        self._update(action, REFUSED, {"refused_at": self._clock()})
+        self.engine._history.record("evolve", action, "changement refusé", {"par": by})
+        return self.action(action)
+
     def rollback(self, action: str, by: str) -> dict:
         if by != "utilisateur":
             raise PolicyError("seul l'utilisateur demande un retour arrière")
@@ -393,10 +447,11 @@ class AutoPilot:
             raise ValueError(f"rien à défaire (état : {row['state']})")
         if self._in_flight():
             raise ValueError("un déploiement est déjà en cours")
-        self._request({"id": action, "kind": "rollback", "to": data["before"], "commit": data["commit"]})
+        self._request({"id": action, "kind": "rollback", "to": data["before"], "commit": data["commit"],
+                       "approved_by": by, "approved_at": self._clock(), "summary": str(data.get("summary", ""))[:300]})
         self._update(action, ROLLING_BACK, {})
         self.engine._history.record("evolve", action, "retour arrière demandé", {"par": by})
-        return self.action(action)
+        return {**self.action(action), "commande": RUN_COMMAND}
 
     # --- Enregistrement ----------------------------------------------------------------------------------------
 
@@ -441,4 +496,5 @@ class AutoPilot:
         return {"actif": self.enabled, "prêt": not reason, "raison": reason,
                 "incomprises_en_attente": sum(r["state"] == PENDING_MISUNDERSTOOD for r in self._rows("incomprise")),
                 "déploiements_24h": self._deploys_today(), "déploiements_max": self.settings.deploys_per_day,
-                "en_déploiement": self._in_flight()}
+                "en_attente_accord": sum(r["state"] == AWAITING for r in self._rows()),
+                "en_déploiement": self._in_flight(), "commande": RUN_COMMAND}

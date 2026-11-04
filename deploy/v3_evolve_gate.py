@@ -34,6 +34,7 @@ FORBIDDEN = (
     "orion/winagent/**", "orion/knowledge/**", "orion/tools/core.py", "orion/tools/base.py", "orion/tools/request.py",
     "orion/tools/confirmation.py", "orion/llm/guard.py", "orion/config.py", "orion/api*.py", "*security*",
     "*permission*", "config.toml", "policies/**", "scripts/v3_*",
+    "orion/factory.py", "orion/wallpaper/server.py", "orion/fragfactory/__init__.py",
 )
 DANGEROUS = (r"shell\s*=\s*True", r"\beval\s*\(", r"\bexec\s*\(", r"os\.system", r"os\.popen", r"pickle\.loads?",
              r"marshal\.loads", r"__import__\s*\(", r"\bsubprocess\b", r"rm\s+-rf", r"ctypes", r"socket\.socket",

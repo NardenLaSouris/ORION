@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,8 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from orion.evolve import EvolveEngine, EvolveSettings, PolicyError, Workspace  # noqa: E402
-from orion.evolve.autopilot import (DANGEROUS, DEPLOYED, DEPLOYING, NOTHING, PENDING_MISUNDERSTOOD,  # noqa: E402
-                                    ROLLING_BACK, TO_VALIDATE, AutoPilot, AutoSettings)
+from orion.evolve.autopilot import (APPROVED, AWAITING, DANGEROUS, DEPLOYED, NOTHING,  # noqa: E402
+                                    PENDING_MISUNDERSTOOD, REFUSED, ROLLING_BACK, RUN_COMMAND, TO_VALIDATE, AutoPilot,
+                                    AutoSettings)
 from orion.evolve.claude_code import EDIT_TOOLS, ClaudeCodeAdvisor  # noqa: E402
 from orion.platform import Store  # noqa: E402
 
@@ -142,25 +145,78 @@ def test_only_you_switch_the_mode_and_level_two_is_required(setup):
 
 # --- Verdicts ---------------------------------------------------------------------------------------------------
 
-def test_a_safe_fix_is_checked_committed_and_handed_to_the_deployment_service(setup, repo):
+def no_request(pilot):
+    return not (Path(pilot.settings.request_dir) / "request.json").exists()
+
+
+def test_a_safe_fix_is_checked_committed_and_then_waits_for_your_approval(setup, repo):
+    """Feuille de route du 4 novembre 2026 : aucun déploiement sans l'intervention et l'approbation du propriétaire."""
     pilot, claude, alerts = setup
     misunderstood(pilot)
     claude.plan("corrigé", replace=FIX, create=NEW_TEST)
-    assert pilot.cycle()["état"] == DEPLOYING
+    assert pilot.cycle()["état"] == AWAITING
     assert claude.calls[0]["cmd"][claude.calls[0]["cmd"].index("--tools") + 1] == EDIT_TOOLS
     assert "lumière du garage" in claude.calls[0]["input"]
-    req = request_file(pilot)
-    assert req["kind"] == "deploy" and req["branch"].startswith("evolve/auto-") and len(req["commit"]) == 40
-    assert req["base"] == git(repo, "rev-parse", "HEAD").strip()  # part exactement du code déployé
+    assert no_request(pilot)  # rien n'est demandé au Core sans vous
+    assert alerts.sent[-1].title == "Amélioration prête : votre accord" and alerts.sent[-1].written_only
+    action = pilot.actions()[0]
+    assert action["state"] == AWAITING and len(action["data"]["commit"]) == 40
     assert 'box["unread"]' in (repo / "orion" / "demo.py").read_text()  # l'installation n'a pas bougé
-    assert pilot.cycle()["état"] == "déploiement en cours"  # un seul à la fois
-    # le service répond
+    assert pilot.status()["en_attente_accord"] == 1
+
+    with pytest.raises(PolicyError):
+        pilot.approve(action["id"], "evolve")  # ORION ne s'approuve jamais elle-même
+    assert no_request(pilot)
+    status, body = pilot.engine.admin("POST", ["auto", action["id"], "approve"], {}, None)  # ORION Control
+    assert status == 200 and body["state"] == APPROVED and body["commande"] == RUN_COMMAND
+    req = request_file(pilot)
+    assert req["kind"] == "deploy" and req["branch"].startswith("evolve/auto-") and req["commit"] == action["data"]["commit"]
+    assert req["approved_by"] == "utilisateur" and req["base"] == git(repo, "rev-parse", "HEAD").strip()
+    with pytest.raises(ValueError):
+        pilot.approve(action["id"], "utilisateur")  # déjà approuvée
+    # vous lancez le déploiement sur le Core ; le service répond
     (Path(pilot.settings.request_dir) / "request.json").unlink()
     (Path(pilot.settings.request_dir) / "result.json").write_text(json.dumps({"id": req["id"], "state": "ok",
                                                                               "kind": "deploy"}))
     assert pilot.collect() == 1
     assert pilot.action(req["id"])["state"] == DEPLOYED
-    assert alerts.sent[-1].title == "Amélioration déployée" and alerts.sent[-1].written_only
+    assert alerts.sent[-1].title == "Amélioration déployée"
+
+
+def test_you_can_refuse_a_ready_change_even_after_approving_it_until_it_is_launched(setup):
+    pilot, claude, _ = setup
+    misunderstood(pilot)
+    claude.plan("corrigé", replace=FIX, create=NEW_TEST)
+    pilot.cycle()
+    action = pilot.actions()[0]
+    branch = action["data"]["branch"]
+    with pytest.raises(PolicyError):
+        pilot.refuse(action["id"], "evolve")
+    pilot.approve(action["id"], "utilisateur")
+    assert pilot.refuse(action["id"], "utilisateur")["state"] == REFUSED
+    assert no_request(pilot)  # la demande préparée est retirée
+    assert branch not in pilot.engine.workspace._git("branch", "--list", branch)
+    with pytest.raises(ValueError):
+        pilot.approve(action["id"], "utilisateur")
+
+
+def test_approval_is_refused_if_the_core_changed_or_the_daily_limit_is_reached(setup, repo):
+    pilot, claude, _ = setup
+    misunderstood(pilot)
+    claude.plan("corrigé", replace=FIX, create=NEW_TEST)
+    pilot.cycle()
+    action = pilot.actions()[0]
+    pilot.settings.deploys_per_day = 0
+    with pytest.raises(ValueError, match="limite"):
+        pilot.approve(action["id"], "utilisateur")
+    pilot.settings.deploys_per_day = 3
+    (repo / "README.md").write_text("autre changement déployé entre-temps\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "déployé par vous")
+    pilot.engine.workspace._git("fetch", "-q", "origin")
+    with pytest.raises(ValueError, match="Core a changé"):
+        pilot.approve(action["id"], "utilisateur")
+    assert no_request(pilot)
 
 
 def test_a_dangerous_request_changes_nothing_and_you_are_told(setup):
@@ -211,9 +267,9 @@ def test_orion_own_proposals_are_judged_too(setup):
     pilot.engine.propose({"title": "Compteur à zéro", "description": "Boîte sans compteur."}, "llm")
     pilot.engine.propose({"title": "Votre idée", "description": "À vous."}, "utilisateur")  # jamais sans vous
     claude.plan("corrigé", replace=FIX, create=NEW_TEST)
-    assert pilot.cycle()["état"] == DEPLOYING
+    assert pilot.cycle()["état"] == AWAITING
     assert "Compteur à zéro" in claude.calls[0]["input"]
-    (Path(pilot.settings.request_dir) / "request.json").unlink()
+    assert no_request(pilot)
     assert pilot.cycle()["état"] == "rien à examiner"
 
 
@@ -224,6 +280,7 @@ def test_rollback_is_requested_by_you_only_after_a_deployment(setup):
     misunderstood(pilot)
     claude.plan("corrigé", replace=FIX, create=NEW_TEST)
     pilot.cycle()
+    pilot.approve(pilot.actions()[0]["id"], "utilisateur")
     req = request_file(pilot)
     with pytest.raises(ValueError):
         pilot.rollback(req["id"], "utilisateur")  # pas encore déployé
@@ -234,7 +291,7 @@ def test_rollback_is_requested_by_you_only_after_a_deployment(setup):
         pilot.rollback(req["id"], "evolve")
     assert pilot.rollback(req["id"], "utilisateur")["state"] == ROLLING_BACK
     back = request_file(pilot)
-    assert back == {**back, "kind": "rollback", "commit": req["commit"], "to": req["base"]}
+    assert back == {**back, "kind": "rollback", "commit": req["commit"], "to": req["base"], "approved_by": "utilisateur"}
     status, body = pilot.engine.admin("GET", ["auto"], {}, None)
     assert status == 200 and body["en_déploiement"] and body["actions"][0]["id"] == req["id"]
 
@@ -304,3 +361,38 @@ def test_a_permission_granted_later_is_seen_at_the_next_cycle(setup):
     claude.plan("rien à faire", risk="nul")
     assert pilot.cycle()["état"] == NOTHING
     assert pilot.status()["prêt"]
+
+
+# --- Exécutant du Core (deploy/v3_evolve_runner.sh) : jamais sans vous -----------------------------------------------
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash absent")
+def test_the_core_runner_does_nothing_without_you_at_a_terminal(tmp_path):
+    runner = ROOT / "deploy" / "v3_evolve_runner.sh"
+    out = subprocess.run(["bash", str(runner)], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                         env={**os.environ, "HOME": str(tmp_path)}, timeout=60)
+    assert out.returncode == 0 and "à lancer par vous dans un terminal" in out.stderr
+    text = runner.read_text(encoding="utf-8")
+    assert text.index("[ ! -t 0 ]") < text.index('mv -f "$REQ" "$PROC"')  # rien n'est pris avant ce contrôle
+    assert '[ "$approved" = "utilisateur" ]' in text and 'read -r -p' in text
+
+
+def test_the_automatic_trigger_is_retired():
+    root = (ROOT / "deploy" / "v3_evolve_root.sh").read_text(encoding="utf-8")
+    assert "systemctl disable --now orion-v3-evolve.path" in root and "PathExists" not in root
+
+
+@pytest.mark.parametrize("path", ["orion/factory.py", "orion/wallpaper/server.py", "orion/fragfactory/__init__.py",
+                                  "orion/platform/permissions.py", "orion/platform/autonomy.py",
+                                  "orion/winagent/server.py", "orion/evolve/autopilot.py", "deploy/v3_evolve_runner.sh"])
+def test_evolve_can_never_change_its_guards_alone(path):
+    """Permissions (F1), arrêt d'urgence, validation, déploiement, retour arrière, accès aux machines, assemblage :
+    refusés par le contrôle indépendant du Core, et par ORION (règles de son clone ou du déploiement)."""
+    import fnmatch
+    from orion.evolve import policy
+    from orion.evolve.autopilot import auto_problems
+    assert any(fnmatch.fnmatch(path, p) for p in gate.FORBIDDEN)
+    try:
+        policy.check_path(path)
+    except policy.PolicyError:
+        return  # protégé d'EVOLVE : il ne peut même pas l'écrire
+    assert any("fichier sensible" in p for p in auto_problems([path, "tests/test_x.py"], [], 2, []))

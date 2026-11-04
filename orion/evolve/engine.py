@@ -510,6 +510,10 @@ class EvolveEngine(BaseModule):
                     return 200, pilot.cycle()
                 if len(parts) == 3 and parts[2] == "rollback" and method == "POST":
                     return 200, pilot.rollback(parts[1], "utilisateur")
+                if len(parts) == 3 and parts[2] == "approve" and method == "POST":
+                    return 200, pilot.approve(parts[1], "utilisateur")
+                if len(parts) == 3 and parts[2] == "refuse" and method == "POST":
+                    return 200, pilot.refuse(parts[1], "utilisateur")
             if parts == ["claude"] and method == "POST":
                 return 201, self.consult(str((data or {}).get("question", "")), "utilisateur")
             if parts == ["history"] and method == "GET":

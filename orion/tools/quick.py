@@ -195,6 +195,11 @@ def _duration_phrase(text: str, after: tuple[str, ...] = ()) -> tuple[str, int, 
     return " ".join(words[start:end]), start, best[1]
 
 
+PRONOUNCE_AS = re.compile(r"(?:prononce|prononcez)\s+(?P<word>.+?)\s+comme\s+(?P<spoken>.+?)\s*[.!]*",
+                          re.IGNORECASE)
+PRONOUNCED_AS = re.compile(r"(?P<word>.+?)\s+se\s+prononce\s+(?:comme\s+)?(?P<spoken>.+?)\s*[.!]*", re.IGNORECASE)
+PRONOUNCE_FORGET = re.compile(r"(?:oublie|oubliez|retire|efface)\s+la\s+prononciation\s+(?:de\s+|d['’]\s*|du\s+)?"
+                              r"(?P<word>.+?)\s*[.!]*", re.IGNORECASE)
 PRONOUN_ON = re.compile(r"(?:r?allume|demarre|reveille|rallume)\s+(?:le|la|l)")
 PRONOUN_SECONDS = 300.0
 FOLLOWUP = re.compile(r"(?:(?:et|non|oui|alors|bon|ok)\s+)?(?:(?P<verb>supprime|supprimes|supprimez|supprimer|"
@@ -274,6 +279,9 @@ class QuickPlanner:
         """Une commande simple, ou None. ``previous`` : action précédente d'une demande enchaînée (« ..., en bleu »
         hérite des lumières)."""
         norm = normalize(text)
+        pronunciation = self._pronunciation(text) if self._exists("set_pronunciation") else None
+        if pronunciation is not None:  # « Discord se prononce discorde » (avant tout autre domaine : « Discord »)
+            return {"type": "tool_call", "tool": pronunciation[0], "parameters": pronunciation[1]}
         combined = self._spotify_with_volume(norm, text) if norm and self._exists("spotify_play") else None
         if combined is not None:
             return combined
@@ -319,6 +327,25 @@ class QuickPlanner:
         if len(ids) == 1:
             return "cancel_reminder", {"reminder_id": ids[0]}
         return "cancel_all_reminders", {"reminder_ids": ",".join(ids)}
+
+    @staticmethod
+    def _pronunciation(text):
+        """« Discord se prononce discorde », « prononce Discord comme discorde », « oublie la prononciation de
+        Discord ». Messages du 4 novembre 2026 : ORION répondait par une explication inventée, sans rien changer."""
+        clean = re.sub(r"[«»\"“”]", " ", text).strip()
+        clean = re.sub(r"^(?:orion|jarvis)\s*,?\s+", "", clean, flags=re.IGNORECASE)
+        if clean.endswith("?"):
+            return None  # une question (« comment se prononce Discord ? ») ne change rien
+        forget = PRONOUNCE_FORGET.fullmatch(clean)
+        if forget:
+            return "forget_pronunciation", {"word": forget.group("word").strip()}
+        match = PRONOUNCE_AS.fullmatch(clean) or PRONOUNCED_AS.fullmatch(clean)
+        if match is None or normalize(match.group("word")).split()[0] in ("comment", "est", "pourquoi", "tu", "je"):
+            return None
+        word, spoken = match.group("word").strip(), match.group("spoken").strip()
+        if len(word.split()) > 3 or len(spoken.split()) > 4:
+            return None
+        return "set_pronunciation", {"word": word, "spoken": spoken}
 
     def _pronoun(self, norm):
         """« Allume-le », « rallume-la » : ce que la dernière action visait, dans les 5 minutes. Message du

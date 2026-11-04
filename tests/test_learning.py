@@ -151,3 +151,60 @@ def test_discord_is_pronounced_the_english_way():
 
     cfg = load_config(Path(__file__).resolve().parent.parent / "config.toml", local=False)
     assert cfg.tts.pronunciations["Discord"] == "diskˈɔʁd" and cfg.tts.pronunciations["Jarvis"] == "ʒaʁvˈis"
+
+@pytest.mark.parametrize("text, expected", [
+    ("« Discord » se prononce « discorde »", ("set_pronunciation", {"word": "Discord", "spoken": "discorde"})),
+    ("Orion, prononce Discord comme discorde.", ("set_pronunciation", {"word": "Discord", "spoken": "discorde"})),
+    ("Frag Factory se prononce frague factori", ("set_pronunciation", {"word": "Frag Factory",
+                                                                      "spoken": "frague factori"})),
+    ("Oublie la prononciation de Discord", ("forget_pronunciation", {"word": "Discord"})),
+    ("Comment se prononce Discord ?", None),  # une question ne change rien
+    ("comment tu prononces Discord", None),
+])
+def test_pronunciation_requests_are_understood_without_the_llm(text, expected):
+    from orion.tools.quick import QuickPlanner
+
+    registry = ToolRegistry()
+    for tool in learning_tools(make_learning_for_tools()):
+        registry.register(tool)
+    call = QuickPlanner(registry).one(text)
+    got = (call["tool"], call["parameters"]) if call and call["tool"].endswith("pronunciation") else None
+    assert got == expected
+
+
+def make_learning_for_tools():
+    import tempfile
+
+    return make(Path(tempfile.mkdtemp()))
+
+
+def test_a_learned_pronunciation_is_kept_applied_to_the_voice_and_forgotten(tmp_path):
+    applied = []
+    learning = make(tmp_path)
+    learning.on_pronunciation = lambda word, spoken: applied.append((word, spoken)) or ("diskɔʁd" if spoken else None)
+    tools = {t.name: t for t in learning_tools(learning)}
+    done = tools["set_pronunciation"].execute({"word": "Discord", "spoken": "discorde"})
+    assert tools["set_pronunciation"].say(done) == ("C'est noté, monsieur : désormais, je dirai « Discord » comme "
+                                                     "« discorde ».")
+    assert make(tmp_path).pronunciations() == {"Discord": "discorde"}  # gardée d'un démarrage à l'autre
+    tools["forget_pronunciation"].execute({"word": "discord"})
+    assert applied == [("Discord", "discorde"), ("Discord", None)] and make(tmp_path).pronunciations() == {}
+    with pytest.raises(ToolError):
+        tools["set_pronunciation"].execute({"word": "Discord", "spoken": "Discord"})  # rien à changer
+
+
+def test_piper_applies_learned_pronunciations_above_the_configured_ones():
+    from orion.tts.piper import PiperTTS, _word_pattern
+
+    class Voice:
+        def phonemize(self, text):
+            return [[c for c in {"discorde": "diskɔʁd", "dixe-corde": "diksəkɔʁd"}.get(text, text)]]
+
+    tts = PiperTTS.__new__(PiperTTS)
+    tts._voice, tts._learned = Voice(), {}
+    tts._lexicon = [(_word_pattern("Discord"), "diskˈɔʁd")]
+    assert tts.prepare("Rejoins Discord.") == "Rejoins [[ diskˈɔʁd. ]]"
+    assert tts.respell("Discord", "dixe-corde") == "diksəkɔʁd"
+    assert tts.prepare("Rejoins Discord.") == "Rejoins [[ diksəkɔʁd. ]]"  # apprise : prime sur la configuration
+    tts.forget_pronunciation("discord")
+    assert tts.prepare("Rejoins Discord.") == "Rejoins [[ diskˈɔʁd. ]]"  # celle de la configuration reprend

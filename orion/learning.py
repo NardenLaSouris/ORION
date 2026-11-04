@@ -76,6 +76,8 @@ class Learning:
         self._clock = clock
         self._lock = threading.Lock()
         self.on_change: Callable[[], None] | None = None  # vocabulaire modifié (indices de Whisper à refaire)
+        # prononciation apprise (mot, orthographe dite) ou oubliée (mot, None) : appliquée à la voix aussitôt
+        self.on_pronunciation: Callable[[str, str | None], str | None] | None = None
         self._data = self._load()
 
     # --- Stockage ------------------------------------------------------------------------------------------
@@ -98,7 +100,42 @@ class Learning:
         wake.setdefault("silent", [])
         wake.setdefault("false_wakes", 0)
         data.setdefault("instructions", [])
+        data.setdefault("pronunciations", {})
         return data
+
+    # --- Prononciations (« Discord se prononce discorde ») ---------------------------------------------------
+
+    def pronunciations(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._data["pronunciations"])
+
+    def set_pronunciation(self, word: str, spoken: str) -> dict:
+        word, spoken = _clean_term(word), _clean_term(spoken)
+        if not PRONOUNCED.fullmatch(word) or not PRONOUNCED.fullmatch(spoken) or normalize(word) == normalize(spoken):
+            raise ToolError(LEARNING_REFUSED, "Dites-moi le mot, puis comment l'écrire pour bien le dire, monsieur : "
+                                              "« Discord se prononce discorde ».")
+        with self._lock:
+            known = self._data["pronunciations"]
+            if len(known) >= MAX_PRONUNCIATIONS and word not in known:
+                raise ToolError(LEARNING_REFUSED, "J'ai déjà beaucoup de prononciations ; oubliez-en une d'abord.")
+            new = known.get(word) != spoken
+            phonemes = self.on_pronunciation(word, spoken) if self.on_pronunciation else None  # refus : non gardé
+            known[word] = spoken
+            self._save()
+        return {"word": word, "spoken": spoken, "new": new, "phonemes": phonemes or ""}
+
+    def forget_pronunciation(self, word: str) -> dict:
+        word = _clean_term(word)
+        with self._lock:
+            known = self._data["pronunciations"]
+            match = next((w for w in known if normalize(w) == normalize(word)), None)
+            if match is None:
+                raise ToolError(LEARNING_REFUSED, f"Je n'ai pas de prononciation apprise pour « {word} ».")
+            del known[match]
+            self._save()
+        if self.on_pronunciation:
+            self.on_pronunciation(match, None)
+        return {"word": match}
 
     # --- Consignes durables (« désormais, réponds-moi plus brièvement ») ---------------------------------------
 
@@ -343,6 +380,14 @@ def _instruction_said(r: dict) -> str:
     return f"C'est noté, monsieur, je m'y tiendrai : « {r['instruction']} »."
 
 
+MAX_PRONUNCIATIONS = 100
+PRONOUNCED = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿœŒ0-9][A-Za-zÀ-ÖØ-öø-ÿœŒ0-9'’ -]{0,40}")
+
+
+def _clean_term(text: str) -> str:
+    return " ".join(str(text or "").strip(" «»\"“”.,;:!?").split())
+
+
 COMMON_WORDS = frozenset(
     "pourquoi quand comment quoi quel quelle quels quelles est sont etait une des les que qui dans pour avec sans "
     "mais donc car pas plus moins tres tout tous toute toutes cette ces ceux celle celui son ses mon mes ton tes "
@@ -385,6 +430,18 @@ def learning_tools(learning: Learning) -> list[Tool]:
              {"instruction": Param(str, "consigne", max_length=MAX_INSTRUCTION, hidden=True, resolve=instruction_of)},
              {"instruction": "consigne", "position": "numéro"}, Risk.SAFE,
              lambda instruction: _add_instruction(learning, instruction), say=_instruction_said),
+        Tool("set_pronunciation", "Apprend comment prononcer un mot (« Discord se prononce discorde », « prononce X "
+             "comme Y »).",
+             {"word": Param(str, "le mot à prononcer", max_length=40, evidence=lambda v, t: normalize(v) in normalize(t)),
+              "spoken": Param(str, "comment le dire, écrit comme il se prononce", max_length=40,
+                              evidence=lambda v, t: normalize(v) in normalize(t))},
+             {"word": "mot", "spoken": "prononciation"}, Risk.SAFE,
+             lambda word, spoken: learning.set_pronunciation(word, spoken),
+             say=lambda r: f"C'est noté, monsieur : désormais, je dirai « {r['word']} » comme « {r['spoken']} »."),
+        Tool("forget_pronunciation", "Oublie la prononciation apprise d'un mot.",
+             {"word": Param(str, "le mot", max_length=40, evidence=lambda v, t: normalize(v) in normalize(t))},
+             {"word": "mot"}, Risk.SAFE, lambda word: learning.forget_pronunciation(word),
+             say=lambda r: f"C'est oublié : je dirai de nouveau « {r['word']} » comme avant."),
         Tool("list_instructions", "Dit les consignes durables données à ORION.", {}, {"instructions": "consignes"},
              Risk.SAFE, lambda: {"instructions": learning.instructions()},
              say=lambda r: ("Vos consignes : " + " ; ".join(f"{n}, {t}" for n, t in enumerate(r["instructions"], 1))

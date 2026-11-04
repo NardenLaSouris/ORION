@@ -37,6 +37,11 @@ def parse_voice_spec(spec: str, voices_dir: Path) -> tuple[Path, str]:
     return voices_dir / f"{name}.onnx", speaker
 
 
+
+def _word_pattern(word: str) -> re.Pattern:
+    return re.compile(rf"\b{re.escape(word)}\b([{re.escape(PUNCTUATION)}]?)", re.IGNORECASE)
+
+
 class PiperTTS:
     def __init__(
         self,
@@ -55,10 +60,8 @@ class PiperTTS:
         self._config = SynthesisConfig(
             length_scale=length_scale, volume=volume, speaker_id=self._speaker_id(speaker)
         )
-        self._lexicon = [
-            (re.compile(rf"\b{re.escape(word)}\b([{re.escape(PUNCTUATION)}]?)", re.IGNORECASE), phonemes)
-            for word, phonemes in (pronunciations or {}).items()
-        ]
+        self._lexicon = [(_word_pattern(word), phonemes) for word, phonemes in (pronunciations or {}).items()]
+        self._learned: dict[str, tuple[re.Pattern, str]] = {}  # « Discord se prononce discorde » (outil vocal)
         self.sample_rate = self._voice.config.sample_rate
         self._soften_endings = soften_endings
         self.voice_name = voice.stem + (f":{speaker}" if self._config.speaker_id is not None else "")
@@ -74,9 +77,23 @@ class PiperTTS:
         raise ValueError(f"Locuteur « {speaker} » inconnu ; disponibles : {', '.join(ids)}")
 
     def prepare(self, text: str) -> str:
-        for pattern, phonemes in self._lexicon:
+        learned = list(self._learned.values())
+        overridden = {pattern.pattern for pattern, _ in learned}
+        for pattern, phonemes in learned + [e for e in self._lexicon if e[0].pattern not in overridden]:
             text = pattern.sub(lambda m, phonemes=phonemes: f"[[ {phonemes}{m.group(1)} ]]", text)
         return text
+
+    def respell(self, word: str, spoken: str) -> str:
+        """Prononciation apprise : ``spoken`` (orthographe dite par vous, « discorde ») lu par la voix elle-même, puis
+        imposé à ``word`` ; rend les phonèmes. Prime sur [tts.pronunciations]."""
+        phonemes = "".join("".join(sentence) for sentence in self._voice.phonemize(spoken)).strip(" .,!?")
+        if not phonemes:
+            raise ValueError("prononciation vide")
+        self._learned[word.lower()] = (_word_pattern(word), phonemes)
+        return phonemes
+
+    def forget_pronunciation(self, word: str) -> None:
+        self._learned.pop(word.lower(), None)  # celle de la configuration, s'il y en a une, reprend
 
     def phonemes(self, text: str) -> str:
         return " ".join("".join(sentence) for sentence in self._voice.phonemize(self.prepare(text)))

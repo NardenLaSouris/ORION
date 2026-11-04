@@ -1035,6 +1035,26 @@ def build_agent(
         except Exception:  # base illisible, disque plein : ORION démarre sans journal
             log.exception("Journal des échanges indisponible")
     learning = build_learning(cfg, personality, stt)
+    if learning is not None and hasattr(tts, "respell"):
+        for word, spoken in learning.pronunciations().items():  # apprises : rappliquées au démarrage
+            try:
+                tts.respell(word, spoken)
+            except ValueError:
+                log.warning("Prononciation apprise illisible ignorée")
+
+        def pronounce(word: str, spoken: str | None) -> str | None:
+            if spoken is None:
+                tts.forget_pronunciation(word)
+                return None
+            try:
+                return tts.respell(word, spoken)
+            except ValueError as exc:
+                from orion.learning import LEARNING_REFUSED
+                from orion.tools.base import ToolError
+
+                raise ToolError(LEARNING_REFUSED, "Je n'arrive pas à dire cela, monsieur.") from exc
+
+        learning.on_pronunciation = pronounce
     if learning is not None and cfg.tools.enabled:
         from orion.learning import learning_tools
 

@@ -22,7 +22,7 @@ from orion.discord.intent import discord_plan  # noqa: E402
 from orion.tools.base import ToolError  # noqa: E402
 from orion.winagent.discord_actions import discord_actions  # noqa: E402
 from orion.winagent.discord_rpc import (CLOSE, FRAME, HANDSHAKE, DiscordLink, DiscordSettings as LinkSettings,  # noqa: E402
-                                        TokenBox, encode)
+                                        RpcError, TokenBox, encode)
 
 ME, ALICE, BOB = "100000000000000001", "100000000000000002", "100000000000000003"
 AMIS, TRAVAIL = "200000000000000001", "200000000000000002"
@@ -212,7 +212,7 @@ def test_authorization_flow_stores_an_encrypted_token_and_never_a_plain_one(fake
     try:
         assert wait(lambda: link.snapshot()["discord"] == "connecté")
         assert link.snapshot()["auth"] == "non lié"
-        with pytest.raises(Exception):
+        with pytest.raises(RpcError):
             link.request("GET_VOICE_SETTINGS")  # rien avant l'autorisation
         assert link.link()["status"] == "pending"
         assert wait(lambda: link.snapshot()["auth"] == "lié")
@@ -275,7 +275,7 @@ def test_discord_closing_and_coming_back_reconnects_by_itself(fake, tmp_path):
         assert wait(lambda: link.snapshot()["auth"] == "lié")
         fake.open = False
         assert wait(lambda: link.snapshot()["discord"] == "fermé")
-        with pytest.raises(Exception):
+        with pytest.raises(RpcError):
             link.request("GET_VOICE_SETTINGS")
         fake.open = True
         assert wait(lambda: link.snapshot()["auth"] == "lié")
@@ -327,9 +327,9 @@ def test_unconfigured_agent_never_talks_to_discord(fake, tmp_path):
     try:
         assert wait(lambda: link.snapshot()["auth"] == "non configuré")
         assert link.snapshot()["discord"] == "ouvert" and fake.commands == []
-        with pytest.raises(Exception):
+        with pytest.raises(RpcError):
             link.link()
-        with pytest.raises(Exception) as err:
+        with pytest.raises(RpcError) as err:
             link.request("GET_VOICE_SETTINGS")
         assert err.value.code == "discord_not_configured"  # jamais « Discord fermé » quand il est ouvert
     finally:
@@ -678,7 +678,7 @@ def test_an_unknown_client_id_is_reported_clearly_like_the_real_discord_does(fak
     try:
         assert wait(lambda: link.snapshot()["auth"] == "identifiant refusé")
         assert "Invalid Client ID" in link.snapshot()["error"] and link.snapshot()["discord"] == "ouvert"
-        with pytest.raises(Exception) as err:
+        with pytest.raises(RpcError) as err:
             link.request("GET_VOICE_SETTINGS")
         assert err.value.code == "discord_bad_client_id"
     finally:

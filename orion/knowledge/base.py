@@ -176,7 +176,7 @@ class KnowledgeBase:
             rivals = self._rivals(new)
             if rivals and origin in ("user", "admin"):
                 for old in rivals:  # vous l'emportez : l'ancienne valeur est remplacée, gardée dans l'historique
-                    self._set_status(old, "superseded", f"remplacée par votre nouvelle valeur", principal)
+                    self._set_status(old, "superseded", "remplacée par votre nouvelle valeur", principal)
                     new.replaces = old.id
                 self._close_conflicts(new.slot, new.id, "remplacée par l'utilisateur")
             elif rivals:

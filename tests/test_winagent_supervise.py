@@ -65,7 +65,7 @@ def test_crashes_are_restarted_with_growing_delays_reset_after_stable_running(tm
         return Child(clock, next(lives), 1)
 
     Supervisor(["agent"], tmp_path, spawn=spawn, clock=clock, sleep=clock.sleep).run(max_starts=5)
-    gaps = [round(b - a) for a, b in zip(starts, starts[1:])]
+    gaps = [round(b - a) for a, b in zip(starts, starts[1:], strict=False)]
     # vie de l'agent + délai : 2, 4, 8 s ; après 400 s de fonctionnement, le délai repart de 2 s
     assert gaps == [1 + 2, 1 + 4, 1 + 8, 400 + 2]
 

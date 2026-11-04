@@ -123,6 +123,8 @@ sudo systemctl start orion-v3
 - La restauration est refusée si le service tourne ou si la sauvegarde ne se vérifie pas (résumés SHA-256 et
   `integrity_check`).
 - Les fichiers actuels sont mis de côté dans `data/avant-restauration-<date>/`, jamais effacés.
+- Répétition faite le 4 novembre 2026 : la dernière sauvegarde réelle a été restaurée dans un dossier jetable. Les
+  4 bases sont intègres et ont toutes leurs tables (`orion_ops`, `orion_personal`, `orion_v3`, `journal`).
 
 ### Tester depuis vos appareils
 

@@ -63,15 +63,26 @@ Mis à jour à chaque livraison. À relire en premier après une interruption.
 | 00:35 | P2 : Frag Factory par l'agent V3 seulement ; client d'agent V3 commun ; instance d'essai aux données fictives | `4e11f4c` | 2439 | oui : chaîne réelle Core → agent → Frag Factory |
 | 00:50 | P2 : routage des demandes de clips, « produis la version 1 », garde-fou des actions prétendues | `3185cee`, `417ad10`, `e74b662` | 2450 | oui : valider, refuser, nouvelle version à la voix, ORION Control |
 | 00:55 | P3 : identifiant Discord refusé signalé clairement (constaté sur le vrai Discord), liaison guidée en un script | `d1644d6` | 2451 | oui : poignée de main réelle avec Discord |
+| 01:10 | P4 KNOWLEDGE : modèle commun des connaissances sur la base chiffrée F4, interface tracée des modules, vue Connaissances | `b55cb93` | 2466 | V3 : module actif et verrouillé (pas de clé) ; vue déverrouillée vérifiée sur un Core de démonstration aux données fictives (arbitrage cliqué) |
+| 01:15 | P5 MISSIONS : analyse architecturale et noyau de planification testé (non raccordé) ; P6 PROACTIVE : architecture | `27272a3` | 2472 | — (documentation et code non raccordé) |
+| 01:20 | Audit : agent V3 sur une copie dédiée fixée sur un commit ; répétition de restauration réelle ; analyse statique | `5d9c13c` et suivants | 2472 | oui : restauration de la sauvegarde réelle dans un dossier jetable, 4 bases intègres |
+
+**État en fin de nuit :**
+- production V2 sur `15621a0`, sans redémarrage depuis le 3 novembre à 16:37 UTC ;
+- V3 active, avec les modules watch, news, evolve, purchase, sentinel, fragfactory, discord et knowledge ;
+- agent Windows V3 supervisé, avec démarrage automatique ;
+- Frag Factory relié à l'instance d'essai ;
+- Discord en attente de votre liaison ;
+- KNOWLEDGE verrouillé, faute de clé.
+
 
 **En attente du propriétaire :**
-- `sudo bash /home/user/orion-v3/deploy/v3_isolation.sh` (règles réseau et limites de ressources de la V3) ;
-- `sudo bash /home/user/orion-v3/deploy/v3_accounts.sh` (comptes `orion-import` et `orion-evolve`), quand les imports
-  seront décidés ;
 - création d'une vraie clé de données personnelles (F4), seulement s'il le décide ;
 - inventaire Takeout, quand l'export sera déposé ;
-- DISCORD : créer l'application dans le Developer Portal, remplir `DISCORD_CLIENT_ID` et `DISCORD_CLIENT_SECRET`,
-  puis « Relier ORION à Discord » dans ORION Control (`discord.md` § 5).
+- DISCORD : `powershell -ExecutionPolicy Bypass -File C:\Users\theju\orion-v3\deploy\v3_discord_setup.ps1`, puis
+  « Relier ORION à Discord » dans ORION Control (`discord.md` § 5) ;
+- Frag Factory réel : relier votre vraie instance (vos enregistrements et transcriptions) est votre décision
+  (`fragfactory.md` § 7) ; la V3 est reliée à l'instance d'essai.
 
 **À chaque déploiement** (V3, et production quand elle est concernée) : relevé des tokens et des heures
 (`python scripts/production_stats.py`), copié dans `data/production_stats.json` de l'environnement.

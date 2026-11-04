@@ -260,6 +260,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
             registry.register(fragfactory)
             tools += fragfactory_tools(fragfactory)
     if "discord" in wanted:
+        from pathlib import Path  # local : la branche EVOLVE en importe un aussi (nom local à toute la fonction)
+
         from orion.config import secret
         from orion.factory import ENV_FILE
         from orion.discord import AgentLink, DiscordEngine, DiscordSettings

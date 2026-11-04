@@ -478,6 +478,10 @@ def test_stylised_discord_names_are_recognised_when_spoken_and_said_without_orna
     assert agent.calls[-1][1]["channel_id"] == "1149744683925372928"
     assert engine.act("join", salon="Skali")["text"] == "Vous avez rejoint Skali sur La Taverne d'Odin."
     assert engine.act("join", salon="entretien 1")["ok"]
+    # « rejoins le salon Attente sur la Taverne » : l'analyse de la phrase garde tout dans le nom du salon
+    assert engine.act("join", salon="attente sur la taverne")["text"] == "Vous avez rejoint Attente sur La Taverne d'Odin."
+    assert engine.act("join", salon="attente sur la cuisine")["text"] == ("Je ne trouve pas de salon vocal "
+                                                                         "« attente sur la cuisine ».")
     assert engine.act("join", salon="chill")["text"] == "Vous avez rejoint Chill sur The Hunter Fishing planet."
     assert "Chill" in engine.summary() and "🔊" not in engine.summary()
 

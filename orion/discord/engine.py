@@ -237,8 +237,23 @@ class DiscordEngine(BaseModule):
 
     def resolve(self, salon: str, serveur: str = "") -> tuple[dict, dict]:
         """Salon vocal d'après son nom dit (accents, casse, emojis ignorés) ; serveur actuel préféré en cas de
-        doublon ; sinon ORION demande lequel, jamais au hasard."""
-        wanted, place = normalize(salon), normalize(serveur)
+        doublon ; sinon ORION demande lequel, jamais au hasard. « Skali sur la Taverne » : si aucun salon ne porte le
+        nom entier, la fin après « sur » désigne le serveur."""
+        try:
+            return self._resolve(salon, serveur)
+        except DiscordUnavailable as exc:
+            words = label(salon).split()
+            cuts = [i for i, w in enumerate(words) if w == "sur" and 0 < i < len(words) - 1]
+            if serveur or exc.code != "channel_not_found" or not cuts:
+                raise
+            place = [w for w in words[cuts[-1] + 1:] if w not in ("le", "la", "les", "l", "serveur")]
+            try:
+                return self._resolve(" ".join(words[:cuts[-1]]), " ".join(place))
+            except DiscordUnavailable:
+                raise exc from None
+
+    def _resolve(self, salon: str, serveur: str) -> tuple[dict, dict]:
+        wanted, place = label(salon), label(serveur)
         guilds = self.directory()
         if place:
             guilds = [g for g in guilds if _matches(label(g["name"]), place)] or []

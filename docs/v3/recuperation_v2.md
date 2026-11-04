@@ -22,7 +22,9 @@ environnement ni agent.
 
 ## 2. Plan, dans l'ordre
 
-### 2.1 Présence (aucun secret)
+### 2.1 Présence (aucun secret) : FAITE le 4 novembre 2026 à 11:57
+
+Réglages recopiés de la V2 sur votre accord (ancienne configuration : `config.local.toml.avant-presence-*`). Au démarrage : « Présence : 5 capteur(s), utilisateurs suivis : owner », « Présence réseau : telephone_monsieur connecté » ; le fond d'écran affiche « Quelqu'un est à la maison ». Reste à vérifier : la source des capteurs de porte et de mouvement, et un départ puis un retour réels.
 
 | | |
 |---|---|

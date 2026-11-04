@@ -1,4 +1,4 @@
-﻿# Installation de référence ORION du PC fixe (docs/v3/installation_pc.md) : l'agent Windows V3 (le seul agent ORION de
+﻿# Installation de référence ORION du PC fixe (docs/v3/reference_unique.md) : l'agent Windows V3 (le seul agent ORION de
 # ce PC) et ORION Control V3, dans C:\Users\theju\.orion, mis à jour depuis la branche v3.
 #
 #   powershell -ExecutionPolicy Bypass -File deploy\pc_install.ps1                  dernier commit de origin/v3

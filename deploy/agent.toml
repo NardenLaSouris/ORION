@@ -1,4 +1,4 @@
-# Agent Windows ORION (V3) du PC fixe : le SEUL agent ORION de ce PC (docs/v3/installation_pc.md).
+# Agent Windows ORION (V3) du PC fixe : le SEUL agent ORION de ce PC (docs/v3/reference_unique.md).
 # Installé et mis à jour par deploy\pc_install.ps1 dans C:\Users\theju\.orion (copié en agent.toml à la racine ;
 # réglages propres à la machine : agent.local.toml à côté). Secrets hors du dépôt : C:\Users\theju\.orion\data\.env
 # (ORION_V3_AGENT_TOKEN, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, FRAGFACTORY_LINK_TOKEN).

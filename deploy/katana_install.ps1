@@ -23,10 +23,15 @@ scp -q -i $Key $Tar "${Katana}:C:/Users/theju/.orion/releases/$Sha.tar"
 ssh -i $Key $Katana "tar -xf C:\Users\theju\.orion\releases\$Sha.tar -C C:\Users\theju\.orion\releases\$Sha && del C:\Users\theju\.orion\releases\$Sha.tar"
 Remove-Item $Tar
 
-# Jeton des agents V3 (installation du PC) passé par l'entrée de la commande, jamais dans une ligne de commande.
+# Jeton des agents V3 (installation du PC) copié par un fichier temporaire, jamais dans une ligne de commande ni par
+# l'entrée d'une commande (Windows PowerShell 5.1 la réencode : jeton déformé, agent qui refuse le Core).
 $Line = Select-String -Path (Join-Path $env:USERPROFILE ".orion\data\.env") -Pattern '^ORION_V3_AGENT_TOKEN=(.+)$'
 if (-not $Line) { throw "ORION_V3_AGENT_TOKEN absent de l'installation du PC." }
-$Script = "`$t = [Console]::In.ReadLine(); & 'C:\Users\theju\.orion\releases\$Sha\deploy\katana_setup.ps1' -Sha '$Sha' -Token `$t"
-$Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
-$Line.Matches[0].Groups[1].Value | ssh -i $Key $Katana "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $Encoded"
+$EnvTmp = Join-Path $env:TEMP ("orion-katana-" + [guid]::NewGuid().ToString("N") + ".env")
+try {
+    [IO.File]::WriteAllText($EnvTmp, "ORION_V3_AGENT_TOKEN=$($Line.Matches[0].Groups[1].Value.Trim())`n", (New-Object Text.UTF8Encoding $false))
+    ssh -i $Key $Katana "if not exist C:\Users\theju\.orion\data mkdir C:\Users\theju\.orion\data"
+    scp -q -i $Key $EnvTmp "${Katana}:C:/Users/theju/.orion/data/.env"
+} finally { Remove-Item $EnvTmp -ErrorAction SilentlyContinue }
+ssh -i $Key $Katana "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/theju/.orion/releases/$Sha/deploy/katana_setup.ps1 -Sha $Sha"
 if ($LASTEXITCODE) { throw "Installation sur le Katana en échec." }

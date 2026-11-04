@@ -36,7 +36,7 @@ Réglages recopiés de la V2 sur votre accord (ancienne configuration : `config.
 | À vérifier | qui alimente les capteurs de porte et de mouvement (`/api/presence` avec le jeton de l'API V2) : si un appareil de la maison les envoie, il faudra le pointer vers l'API V3 (8866) avec son jeton |
 | Essai | sortir puis revenir avec le téléphone ; « suis-je à la maison ? » |
 
-### 2.2 Mail
+### 2.2 Mail : FAIT le 4 novembre à 12:12 (mot de passe de la V2 repris sur votre accord)
 
 | | |
 |---|---|
@@ -47,7 +47,7 @@ Réglages recopiés de la V2 sur votre accord (ancienne configuration : `config.
 | Données | `mail_seen.json`, `mail_actions.json` : non repris ; au premier passage, les non-lus existants deviennent « vus » sans annonce (`orion/mail/watch.py`) |
 | Essai | « ai-je des mails ? », réception d'un mail de test, annonce d'une échéance (aucun rappel créé sans votre « oui ») |
 
-### 2.3 Agenda
+### 2.3 Agenda : FAIT à 12:11 (`calendar.json` repris ; la V2 n'avait pas d'adresse iCal)
 
 | | |
 |---|---|
@@ -58,7 +58,7 @@ Réglages recopiés de la V2 sur votre accord (ancienne configuration : `config.
 | Données | `calendar.json` (vos événements saisis à la voix) : données personnelles, reprise seulement avec votre accord |
 | Essai | « qu'est-ce que j'ai demain ? » |
 
-### 2.4 Éclairage
+### 2.4 Éclairage : FAIT à 12:12 (clés de la V2 reprises sur votre accord ; chambre et entrée lues)
 
 | | |
 |---|---|

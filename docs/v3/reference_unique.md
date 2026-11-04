@@ -22,7 +22,7 @@ parallèle.
 | Git | `v3` : seule branche de développement ; `V2` gelée (maintenance explicite seulement) |
 | Mini-PC | `/opt/orion-v3`, service `orion-v3`, son `.env`, ses bases ; déploiement `deploy/v3_deploy.sh` (gardes, sauvegarde vérifiée, avance rapide seulement, contrôle de santé, retour automatique) |
 | PC fixe | `C:\Users\theju\.orion` : `releases\<commit>` (code), `current` / `previous`, `venv` (son propre Python), `agent.toml` (+ `agent.local.toml`), `data` (`.env`, journaux, liaison Discord), lanceur stable `pc_start.pyw` ; un raccourci « ORION Agent » et un « ORION Control » (démarrage de session et menu Démarrer) |
-| Katana | services IA seulement : Ollama, transcription (GPU, jeton de la V3), visage en kiosque sur le visage V3 (port 8865) ; plus d'agent ORION |
+| Katana | services IA : Ollama, transcription (GPU, jeton de la V3), visage en kiosque (8865) ; agent V3 (`C:\Users\theju\.orion`, port 8875, sans audio), mis à jour par `deploy\katana_install.ps1` depuis le PC |
 
 Pourquoi `C:\Users\theju\.orion` : hors d'AppData (l'application Claude, installée en paquet isolé, y détourne les
 écritures de ses programmes ; c'est ce qui avait caché le `.env` de l'agent V3), et hors de `C:\Users\theju\ORION`
@@ -58,6 +58,8 @@ unique et la relance après plantage (superviseur) sont conservés. Journal : `d
 | 11:52 | Frag Factory d'essai relancé dans `C:\Users\theju\.orion\fragfactory-essai` (données fictives reprises), fond d'écran de Wallpaper Engine sur la page V3 (8867 ; configuration d'origine sauvegardée dans `.orion\sauvegardes`) | Frag Factory relié au Core ; page V3 affichée |
 | 11:57 | Présence reprise de la V2 (votre accord) | téléphone vu connecté, 5 capteurs |
 | 11:59 | Fond d'écran V3 : actions rétablies (`actions = true`, comme en V2 : rappels, lumières, Spotify), conversation écrite gardée | `/config` : 9 actions, `chat` actif |
+| 12:11 | Reprise de la V2 sur votre accord explicite : secrets de l'éclairage, du mail, de Spotify et de la passerelle d'appel recopiés dans le `.env` de la V3 (jamais affichés ; ni le jeton d'agent ni celui de transcription de la V2) ; agenda, routines, mémoire, apprentissages et règles d'appel recopiés (droits 660, sauvegarde `data/avant-reprise-*`) ; `[lights]` et `[mail]` repris tels quels | mail connecté (non-lus existants marqués connus) ; chambre et entrée lues ; 2 routines |
+| 12:16 | Agent V3 du Katana (sur votre demande) : `deploy\katana_install.ps1`, port 8875, jeton unique des agents V3, appareil « votre PC portable » dans le Core | action `system_info` acceptée ; fond d'écran : charge des deux PC, lumières, mail, appareils |
 | 11:00 | Copies de travail `orion-v3-agent` et `orion-fragfactory` retirées (propres, intégrées à `v3`, inutilisées ; branches gardées) | — |
 
 Refusé par le contrôle de sécurité automatique de la session (non contourné) : rotation du jeton de transcription du

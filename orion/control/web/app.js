@@ -695,6 +695,7 @@
         mod("evolve", "/patches"), mod("evolve", "/proposals"), mod("evolve", "/history")]);
       const refresh = () => show("evolve");
       const detail = el("div", {});
+      const question = el("input", { type: "text", placeholder: "Question pour Claude Code (facultatif)", style: "min-width:22em" });
       async function diagnose(sig) {
         const d = await act(mod("evolve", `/anomalies/${sig}`, "POST"));
         if (!d) return;
@@ -708,8 +709,12 @@
         el("h1", {}, "Évolution"),
         cards([["Niveau", `${status.niveau} — ${status["niveau_libellé"]}`, status.remarque || "niveau 3 désactivé"],
           ["Anomalies", status.anomalies], ["Propositions en attente", status.propositions_en_attente],
-          ["Correctifs", status.correctifs]]),
-        el("div", { class: "toolbar" },
+          ["Correctifs", status.correctifs],
+          ["Claude Code", status.claude_code || "non configuré",
+            `${status.consultations_24h || 0} / ${status.consultations_max || 0} consultations sur 24 h`]]),
+        el("div", { class: "toolbar" }, question,
+          button("Demander à Claude Code", () => act(mod("evolve", "/claude", "POST", { question: question.value }),
+            "Propositions de Claude Code ajoutées (en attente de votre décision).").then(refresh), "primary"),
           button("Analyser le journal", () => act(mod("evolve", "/scan", "POST"), "Analyse faite.").then(refresh)),
           button("Niveau 1 (observateur)", () => act(mod("evolve", "/level", "PUT", { level: 1 }), "Niveau 1.").then(refresh)),
           button("Niveau 2 (développeur)", () => confirm("Autoriser EVOLVE à préparer des correctifs (branches, tests, commits) dans son espace isolé ?")

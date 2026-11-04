@@ -460,6 +460,16 @@ class EvolveConfig:
     remote: str = ""  # vide : la Pull Request est préparée localement, rien n'est poussé
     scan_minutes: float = 60.0
     journal_units: tuple = ("orion",)
+    # Consultation de Claude Code (orion/evolve/claude_code.py) : binaire installé par deploy/v3_claude_code_root.sh,
+    # jeton par deploy/v3_claude_code_setup.sh ; lecture seule dans le clone, propositions en file d'attente.
+    claude_code: bool = False
+    claude_binary: str = "/opt/orion-v3-claude/claude"
+    claude_home: Path = Path("data/evolve/claude-home")
+    claude_model: str = "opus"
+    claude_effort: str = "high"
+    claude_timeout: float = 900.0
+    claude_per_day: int = 6
+    claude_auto: bool = True
 
 
 @dataclass(frozen=True)

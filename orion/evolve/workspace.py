@@ -79,12 +79,26 @@ class Workspace:
         """Clone le dépôt source s'il n'est pas déjà là ; rend son chemin."""
         if not (self.repo / ".git").exists():
             self.root.mkdir(parents=True, exist_ok=True)
+            self._trust_source()
             self._cmd(["git", "clone", "--no-hardlinks", "--quiet", self.source, str(self.repo)], cwd=self.root)
             if self.base:
                 self._git("checkout", "--quiet", self.base)
         if not self.base:
             self.base = self._git("rev-parse", "--abbrev-ref", "HEAD").strip()
         return self.repo
+
+    def _trust_source(self) -> None:
+        """Le dépôt source local (/opt/orion-v3) appartient au compte qui déploie, pas à celui d'ORION : git refuse
+        alors de le cloner (« dubious ownership »). Il est déclaré sûr dans la configuration de l'espace de travail
+        seulement (HOME = ce dossier), pour ce seul chemin."""
+        source = Path(self.source)
+        if "://" in self.source or not source.is_dir():
+            return
+        config = self.root / ".gitconfig"
+        line = f"\tdirectory = {source.resolve().as_posix()}\n"
+        text = config.read_text(encoding="utf-8") if config.exists() else ""
+        if line not in text:
+            config.write_text(text + ("[safe]\n" if "[safe]" not in text else "") + line, encoding="utf-8")
 
     def current_branch(self) -> str:
         return self._git("rev-parse", "--abbrev-ref", "HEAD").strip()

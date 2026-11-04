@@ -216,10 +216,20 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
         e = cfg.evolve
         code_root = Path(orion.__file__).resolve().parents[1]
         workspace = Workspace(Path(e.workspace), e.repository or str(code_root), [code_root])
-        registry.register(EvolveEngine(store, workspace, settings=EvolveSettings(e.level, e.scan_minutes,
-                                                                                 tuple(e.journal_units), e.remote),
+        claude = None
+        if e.claude_code:
+            from orion.config import secret
+            from orion.evolve.claude_code import TOKEN_NAME, ClaudeCodeAdvisor
+            from orion.factory import ENV_FILE
+
+            claude = ClaudeCodeAdvisor(Path(e.claude_binary), Path(e.claude_home),
+                                       lambda: secret(TOKEN_NAME, ENV_FILE), model=e.claude_model,
+                                       effort=e.claude_effort, timeout=e.claude_timeout)
+        settings = EvolveSettings(e.level, e.scan_minutes, tuple(e.journal_units), e.remote,
+                                  claude_per_day=e.claude_per_day, claude_auto=e.claude_auto)
+        registry.register(EvolveEngine(store, workspace, settings=settings,
                                        llm=structured, alerts=alerts, scheduler=scheduler, history=history,
-                                       gate=permits.gate("module:evolve") if permits else None))
+                                       gate=permits.gate("module:evolve") if permits else None, claude=claude))
     if "purchase" in wanted:
         from orion.purchase import PurchaseEngine, PurchaseSettings, SandboxMerchant, SandboxPayment
         from orion.purchase.tools import purchase_tools

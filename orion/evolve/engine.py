@@ -71,6 +71,16 @@ EDITS_SCHEMA = {
                            "content": {"type": "string", "maxLength": 20000}}}},
     },
 }
+CONSULT_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["proposals"],
+    "properties": {"proposals": {"type": "array", "maxItems": 3, "items": PROPOSAL_SCHEMA}},
+}
+CONSULT_TASK = ("Propose au plus trois améliorations d'ORION, les plus utiles d'abord, fondées sur le code de ce "
+                "dossier et sur les données jointes (question du propriétaire, anomalies, diagnostics). Pour chacune : "
+                "titre, description, intérêt, difficulté (faible, moyenne ou élevée), dépendances (fichiers), risques, "
+                "coût estimé, plan de réalisation, tests nécessaires. N'en reprends aucune déjà proposée. Aucune ne "
+                "doit affaiblir la sécurité, les permissions ou la protection des données personnelles.")
+DAY = 86_400.0
 EDITS_TASK = ("Écris le correctif minimal de cette anomalie d'ORION : des remplacements exacts (search apparaît une "
               "seule fois dans le fichier) et un nouveau fichier de test de non-régression dans tests/. Ne touche ni "
               "à la sécurité, ni aux permissions, ni aux secrets, ni aux dépendances.")
@@ -84,6 +94,8 @@ class EvolveSettings:
     remote: str = ""
     external_threshold: int = 50
     latency_threshold: float = 6.0
+    claude_per_day: int = 6  # consultations de Claude Code par 24 heures (vous et EVOLVE ensemble)
+    claude_auto: bool = True  # EVOLVE consulte de lui-même après une nouvelle anomalie logicielle
 
 
 @dataclass
@@ -107,8 +119,10 @@ class EvolveEngine(BaseModule):
     def __init__(self, store: Store, workspace: Workspace | None, *, settings: EvolveSettings | None = None,
                  llm: StructuredLLM | None = None, alerts: AlertRouter | None = None,
                  scheduler: Scheduler | None = None, history: History | None = None,
-                 logs: Callable[[], list[str]] | None = None, clock: Callable[[], float] = time.time, gate=None):
+                 logs: Callable[[], list[str]] | None = None, clock: Callable[[], float] = time.time, gate=None,
+                 claude=None):
         self._store, self.workspace, self._llm, self._alerts = store, workspace, llm, alerts
+        self._claude = claude  # ClaudeCodeAdvisor (orion/evolve/claude_code.py) : None tant qu'il n'est pas relié
         self._gate = gate  # moteur central des permissions (CORE FOUNDATION F1) : « module:evolve »
         self._defaults = settings or EvolveSettings()
         self._scheduler = scheduler or Scheduler(clock)
@@ -179,7 +193,15 @@ class EvolveEngine(BaseModule):
                                                f"{a.count} occurrence(s) ; diagnostic disponible dans ORION Control.",
                                                AlertLevel.INFO, key=f"anomaly:{a.signature}"))
         self._propose_recurring()
-        return {"anomalies": len(anomalies), "nouvelles": len(new)}
+        consulted = 0
+        fresh = [a for a in new if a.kind == SOFTWARE]
+        if fresh and self._defaults.claude_auto and self._claude is not None and self._claude.usable:
+            try:  # EVOLVE interroge Claude Code : propositions en file d'attente, rien d'autre
+                consulted = len(self.consult("", by="evolve", focus=[a.signature for a in fresh]))
+            except (PolicyError, ValueError, RuntimeError) as exc:
+                log.info("EVOLVE : pas de consultation de Claude Code (%s)", exc)
+        report = {"anomalies": len(anomalies), "nouvelles": len(new)}
+        return {**report, "propositions_claude": consulted} if self._claude is not None else report
 
     def anomaly(self, signature: str) -> Anomaly | None:
         row = self._store.one("SELECT data FROM evolve_anomalies WHERE signature = ?", (signature,))
@@ -242,6 +264,53 @@ class EvolveEngine(BaseModule):
                                PROPOSAL_SCHEMA, {"contexte": context[:3000]})
         return self.propose(answer, "llm") if answer else None
 
+    # --- Consultation de Claude Code -------------------------------------------------------------------------
+
+    def _claude_calls(self) -> list[float]:
+        row = self._store.one("SELECT value FROM evolve_settings WHERE key = 'claude_calls'")
+        now = self._clock()
+        return [t for t in (loads(row["value"], []) if row else []) if now - t < DAY]
+
+    def consult(self, question: str = "", by: str = "utilisateur", focus: list[str] | None = None) -> list[dict]:
+        """Interroge Claude Code (lecture seule, dans le clone isolé) ; ses propositions rejoignent la file
+        d'attente, origine « claude ». ``by`` : « utilisateur » (ORION Control) ou « evolve » (après une anomalie)."""
+        policy.require(self.level, policy.PROPOSE)
+        if self._claude is None or not self._claude.usable:
+            raise PolicyError("Claude Code n'est pas relié : " + (self._claude.state() if self._claude else
+                                                                  "[evolve] claude_code = false"))
+        if self.workspace is None:
+            raise PolicyError("aucun espace de travail configuré")
+        calls = self._claude_calls()
+        if len(calls) >= self._defaults.claude_per_day:
+            raise ValueError(f"limite atteinte : {self._defaults.claude_per_day} consultations par 24 heures")
+        try:
+            repo = self.workspace.ensure()
+        except Exception as exc:  # noqa: BLE001 - clone impossible : pas de consultation
+            raise ValueError(f"clone isolé du code indisponible ({type(exc).__name__})") from exc
+        context = {"question": str(question or "Quelles améliorations apporteraient le plus à ORION ?")[:2000]}
+        anomalies = [a for a in self.anomalies() if a.get("status") == "ouverte"
+                     and (not focus or a["signature"] in focus)][:10]
+        if anomalies:
+            context["anomalies"] = "\n".join(
+                f"- [{a['kind']}] {a['title'][:200]} ({a['count']} fois) ; fichiers : "
+                + ", ".join(dict.fromkeys(f["path"] for f in a.get("frames", []) if f["path"].startswith("orion/")))
+                for a in anomalies)
+            notes = [d for d in (self.diagnosis(a["signature"]) for a in anomalies) if d]
+            if notes:
+                context["diagnostics"] = "\n".join(f"- {d['summary'][:300]}" for d in notes)[:4000]
+        titles = [p["title"] for p in self.proposals()][:40]
+        if titles:
+            context["déjà proposées"] = "\n".join(f"- {t}" for t in titles)
+        self._store.write("INSERT INTO evolve_settings (key, value) VALUES ('claude_calls', ?) ON CONFLICT(key) "
+                          "DO UPDATE SET value = excluded.value", (dumps(calls + [self._clock()]),))
+        answer = self._claude.ask(CONSULT_TASK, CONSULT_SCHEMA, context, cwd=repo)
+        self._history.record("evolve", "", "consultation claude", {
+            "par": by, "question": context["question"][:200], "réussie": answer is not None,
+            **({"erreur": self._claude.last_error} if answer is None else {})})
+        if answer is None:
+            raise ValueError(f"Claude Code n'a pas répondu ({self._claude.last_error or 'réponse écartée'})")
+        return [self.propose(p, "claude") for p in answer["proposals"]]
+
     def decide(self, proposal_id: str, accepted: bool, by: str) -> dict:
         if by != "utilisateur":
             raise PolicyError("seul l'utilisateur accepte ou refuse une proposition")
@@ -292,7 +361,11 @@ class EvolveEngine(BaseModule):
             raise PolicyError("aucun espace de travail configuré")
         context = self._patch_context(origin)
         if edits is None:
-            answer = self._llm.ask(EDITS_TASK, EDITS_SCHEMA, context) if self._llm is not None else None
+            answer = None
+            if self._claude is not None and self._claude.usable:  # Claude Code rédige, ORION vérifie et teste
+                answer = self._claude.ask(EDITS_TASK, EDITS_SCHEMA, context, cwd=self.workspace.ensure())
+            if answer is None and self._llm is not None:
+                answer = self._llm.ask(EDITS_TASK, EDITS_SCHEMA, context)
             if answer is None:
                 raise ValueError("LLM indisponible ou réponse refusée : correctif à fournir à la main")
             edits, message = answer["edits"], answer["message"]
@@ -379,7 +452,9 @@ class EvolveEngine(BaseModule):
         return {"niveau": int(self.level), "niveau_libellé": self.level.label, "remarque": self.level_note,
                 "anomalies": len(self.anomalies()), "propositions_en_attente": sum(p["status"] == PENDING
                                                                                   for p in self.proposals()),
-                "correctifs": len(self.patches()), "dépôt_distant": bool(self._defaults.remote)}
+                "correctifs": len(self.patches()), "dépôt_distant": bool(self._defaults.remote),
+                "claude_code": self._claude.state() if self._claude is not None else "non configuré",
+                "consultations_24h": len(self._claude_calls()), "consultations_max": self._defaults.claude_per_day}
 
     def admin(self, method: str, parts: list[str], query: dict, data: Any) -> tuple[int, Any]:
         try:
@@ -412,6 +487,8 @@ class EvolveEngine(BaseModule):
                     return 201, self.propose(data)
             if len(parts) == 3 and parts[0] == "proposals" and method == "POST" and parts[2] in ("accept", "reject"):
                 return 200, self.decide(parts[1], parts[2] == "accept", "utilisateur")
+            if parts == ["claude"] and method == "POST":
+                return 201, self.consult(str((data or {}).get("question", "")), "utilisateur")
             if parts == ["history"] and method == "GET":
                 return 200, self._history.list("evolve", limit=200)
         except KeyError:

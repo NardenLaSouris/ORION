@@ -115,6 +115,37 @@ Il n'y a rien à défaire en production : EVOLVE n'y touche pas.
 - **Statut :** toujours « en attente » au départ. Seul l'utilisateur accepte ou refuse.
 - **Aucun développement** sans acceptation, même si le LLM juge l'idée intéressante.
 
+## Consulter Claude Code (`claude_code.py`)
+
+EVOLVE peut interroger Claude Code (abonnement du propriétaire, pas l'API) pour des propositions d'amélioration et,
+au niveau 2, pour rédiger le correctif d'une anomalie ou d'une proposition acceptée.
+
+- **Comment** : `claude -p` lancé dans le clone isolé (`data/evolve/repo`), jamais dans `/opt/orion-v3` ; outils
+  `Read`, `Grep`, `Glob` seulement, `--restricted` (fichiers confinés au clone, aucune commande, pas de web, réglages
+  utilisateur ignorés), aucun serveur MCP, aucune session gardée ; réponse au format `--json-schema`, revérifiée par
+  ORION. Demande par l'entrée standard, jamais sur la ligne de commande.
+- **Quand** : bouton « Demander à Claude Code » (ORION Control, vue « Évolution », question facultative), et de
+  lui-même après une nouvelle anomalie logicielle (`claude_auto`). Au plus `claude_per_day` (6) consultations par
+  24 heures, les deux ensemble ; chaque consultation est inscrite à l'historique (« consultation claude »).
+- **Ce qui part** : votre question, les anomalies ouvertes (type, titre, nombre, fichiers), les résumés de diagnostic,
+  les titres déjà proposés, puis ce que Claude Code lit lui-même dans le clone (le code suivi par Git : ni `.env`, ni
+  `config.local.toml`, ni `data/`). Adresses, numéros, paramètres d'adresse web et phrases citées « … » sont masqués.
+  Jamais vos messages, mails, agenda ni connaissances.
+- **Ce qui revient** : au plus trois propositions, origine « claude », en attente : vous seul les acceptez. Un
+  correctif rédigé par Claude Code passe par la même politique, les mêmes tests et la même Pull Request préparée.
+- **Jeton** : `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) dans `/opt/orion-v3/.env`, passé au seul processus
+  Claude Code ; l'environnement des tests du clone l'ignore (`clean_env`).
+
+Mise en place (sur le Core) :
+
+```bash
+ssh -t user@192.168.1.91 "sudo bash /home/user/orion-v3/deploy/v3_claude_code_root.sh"   # programme
+claude setup-token                                                                       # jeton (PC)
+ssh -t user@192.168.1.91 "bash /home/user/orion-v3/deploy/v3_claude_code_setup.sh"       # saisie masquée
+```
+
+Couper : `v3_claude_code_setup.sh --desactiver` ; effacer le jeton : `--oublier` (et le révoquer côté Claude).
+
 ## Interfaces
 
 `/api/modules/evolve` :

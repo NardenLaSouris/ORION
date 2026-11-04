@@ -601,6 +601,12 @@ journal_enabled = true
 [evolve]
 enabled = false
 level = 1
+# Consulter Claude Code (lecture seule dans le clone ; deploy/v3_claude_code_root.sh puis v3_claude_code_setup.sh)
+claude_code = false
+claude_model = "opus"
+claude_effort = "high"
+claude_per_day = 6
+claude_auto = true
 
 # Santé d'ORION et de ses ressources (docs/v3/sentinel.md) : lecture seule ; exige [platform].
 [sentinel]

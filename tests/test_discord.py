@@ -730,3 +730,16 @@ def test_connect_me_without_a_channel_uses_your_usual_channel_or_says_you_are_th
     bare, bare_agent, _ = engine_with()
     assert bare.act("join")["text"] == "Quel salon vocal voulez-vous rejoindre ?"  # aucun salon habituel réglé
     assert bare_agent.calls[-1][0] != "discord_join"
+
+def test_channels_where_orion_saw_you_are_remembered_across_restarts(tmp_path):
+    agent = FakeAgent()
+    agent.remote["voice"] = {"channel_id": "1400000000000000001", "channel": "Général", "guild_id": "1400000000000000000",
+                             "guild": "Et le Zombie avec ou sans ??", "participants": [{"id": ME, "name": "Moi"}]}
+    settings = DiscordSettings(default_salon="Général", default_serveur="Et le Zombie avec ou sans")
+    DiscordEngine(agent, settings=settings, seen_path=tmp_path / "discord_seen.json").poll()
+    saved = (tmp_path / "discord_seen.json").read_text(encoding="utf-8")
+    assert "1400000000000000001" in saved and "Moi" not in saved  # identifiants et noms de salon, jamais les participants
+    agent.remote["voice"] = None
+    again = DiscordEngine(agent, settings=settings, seen_path=tmp_path / "discord_seen.json")
+    again.poll()
+    assert again.act("join")["ok"] and agent.calls[-1][1]["channel_id"] == "1400000000000000001"

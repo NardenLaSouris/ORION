@@ -63,14 +63,15 @@ class DiscordEngine(BaseModule):
 
     def __init__(self, agent: AgentLink, *, scheduler: Scheduler | None = None,
                  decide: Callable[..., Any] | None = None, ledger=None, settings: DiscordSettings | None = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, seen_path=None):
         self._agent, self._decide, self._ledger = agent, decide, ledger
+        self._seen_path = seen_path  # salons où ORION vous a vu : gardés d'un démarrage à l'autre
         self._clock = clock
         self._scheduler = scheduler or Scheduler(clock)
         self.settings = settings or DiscordSettings()
         self._lock = threading.Lock()
         self._remote: dict | None = None  # dernier état rendu par l'agent
-        self._seen: dict[str, tuple[dict, dict]] = {}  # salons où ORION vous a vu (identifiants)
+        self._seen: dict[str, tuple[dict, dict]] = self._load_seen()  # salons où ORION vous a vu (identifiants)
         self._agent_state, self._agent_since, self._agent_error = OFFLINE, clock(), "jamais joint"
         self._last_seq = 0
         self._events: deque[dict] = deque(maxlen=self.settings.events_kept)
@@ -295,9 +296,36 @@ class DiscordEngine(BaseModule):
                 self._remote = remote
                 voice = remote.get("voice") or {}
                 if voice.get("channel_id"):  # salon où vous êtes allé : retrouvable même absent de la liste
-                    self._seen[voice["channel_id"]] = ({"id": voice.get("guild_id", ""), "name": voice.get("guild", "")},
-                                                       {"id": voice["channel_id"], "name": voice.get("channel", "")})
+                    entry = ({"id": voice.get("guild_id", ""), "name": voice.get("guild", "")},
+                             {"id": voice["channel_id"], "name": voice.get("channel", "")})
+                    if self._seen.get(voice["channel_id"]) != entry:
+                        self._seen[voice["channel_id"]] = entry
+                        self._save_seen()
         return remote or {}
+
+    def _load_seen(self) -> dict:
+        import json
+
+        try:
+            data = json.loads(self._seen_path.read_text(encoding="utf-8")) if self._seen_path else {}
+            return {k: (dict(v[0]), dict(v[1])) for k, v in data.items() if str(k).isdigit()}
+        except (OSError, ValueError, TypeError, IndexError, KeyError):
+            return {}  # absent ou abîmé : on repart de zéro, sans gêner le module
+
+    def _save_seen(self) -> None:
+        """Identifiants et noms seulement (jamais les participants), 50 salons au plus."""
+        if not self._seen_path:
+            return
+        import json
+        import os
+
+        keep = dict(list(self._seen.items())[-50:])
+        try:
+            tmp = self._seen_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self._seen_path)
+        except OSError:
+            log.warning("Discord : salons connus non enregistrés")
 
     def _resolve_known(self, salon: str, serveur: str) -> tuple[dict, dict]:
         """``resolve``, puis les salons où ORION vous a vu : Discord ne donne pas toujours tous vos serveurs

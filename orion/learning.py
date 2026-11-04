@@ -303,6 +303,46 @@ class Learning:
             self._save()
 
 
+# Domaines traités par des règles fixes (orion/tools/quick.py, orion/discord/intent.py...), sans le LLM : une
+# consigne (donnée au LLM) n'y change rien. Consigne Discord du 4 novembre 2026 : « je m'y tiendrai », puis ignorée.
+FIXED_DOMAINS = (
+    ("Discord", re.compile(r"\b(?:discord|vocal|vocaux|salon|salons|micro|sourdine|mute|demute|unmute|deafen)\b")),
+    ("les rappels, minuteurs et réveils", re.compile(r"\b(?:rappel|rappels|minuteur|minuteurs|reveil|reveils|alarme|"
+                                                      r"alarmes|timer)\b")),
+    ("les lumières", re.compile(r"\b(?:lumiere|lumieres|lampe|lampes|eclairage|ampoule|ampoules)\b")),
+    ("la musique et le volume", re.compile(r"\b(?:musique|spotify|chanson|morceau|volume|playlist)\b")),
+    ("le PC (applications, fichiers, verrouillage)", re.compile(r"\b(?:pc|ordinateur|ordi|application|applications|"
+                                                                 r"appli|fichier|fichiers|verrouille|eteins)\b")),
+    # « appelle-moi monsieur » est une consigne de style : seuls les appels téléphoniques comptent ici
+    ("les appels", re.compile(r"\b(?:appel|appels|telephone|telephoner|appelle moi (?:si|quand|des|a|au|dans|en|"
+                              r"chaque|tous|toutes))\b")),
+)
+
+
+def fixed_domain(text: str) -> str:
+    """Domaine à règles fixes dont parle une consigne (« quand je dis connecte-moi en vocal… » : Discord), sinon ""."""
+    norm = f" {normalize(text)} "
+    return next((name for name, pattern in FIXED_DOMAINS if pattern.search(norm)), "")
+
+
+def _add_instruction(learning, instruction: str) -> dict:
+    result = {**learning.add_instruction(instruction), "domain": fixed_domain(instruction)}
+    if result["domain"] and result["new"]:  # signalé au journal : ce comportement demande un réglage
+        log.warning("Consigne n° %s hors d'atteinte des consignes (%s : règles fixes) : un réglage est nécessaire",
+                    result["position"], result["domain"])
+    return result
+
+
+def _instruction_said(r: dict) -> str:
+    if not r["new"]:
+        return f"C'était déjà noté : « {r['instruction']} »."
+    if r.get("domain"):
+        return (f"Je l'ai noté : « {r['instruction']} ». Mais je ne peux pas vous promettre de m'y tenir, monsieur : "
+                f"je traite {r['domain']} par des règles fixes, qui ne lisent pas les consignes. Ce comportement "
+                f"demande un réglage ; je le signale.")
+    return f"C'est noté, monsieur, je m'y tiendrai : « {r['instruction']} »."
+
+
 COMMON_WORDS = frozenset(
     "pourquoi quand comment quoi quel quelle quels quelles est sont etait une des les que qui dans pour avec sans "
     "mais donc car pas plus moins tres tout tous toute toutes cette ces ceux celle celui son ses mon mes ton tes "
@@ -344,9 +384,7 @@ def learning_tools(learning: Learning) -> list[Tool]:
              "plus brièvement »).",
              {"instruction": Param(str, "consigne", max_length=MAX_INSTRUCTION, hidden=True, resolve=instruction_of)},
              {"instruction": "consigne", "position": "numéro"}, Risk.SAFE,
-             lambda instruction: learning.add_instruction(instruction),
-             say=lambda r: (f"C'est noté, monsieur, je m'y tiendrai : « {r['instruction']} »." if r["new"]
-                            else f"C'était déjà noté : « {r['instruction']} »."), ),
+             lambda instruction: _add_instruction(learning, instruction), say=_instruction_said),
         Tool("list_instructions", "Dit les consignes durables données à ORION.", {}, {"instructions": "consignes"},
              Risk.SAFE, lambda: {"instructions": learning.instructions()},
              say=lambda r: ("Vos consignes : " + " ; ".join(f"{n}, {t}" for n, t in enumerate(r["instructions"], 1))

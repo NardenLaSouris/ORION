@@ -125,3 +125,22 @@ def test_agent_rewrites_learned_words_and_hardens_after_a_false_wake(tmp_path):
     assert any(k == "correction" and "le salon" in t and "vocabulaire appris" in t for k, t in events)
     assert any(k == "learning" and "Faux réveil" in t for k, t in events)
     assert learning.wake_threshold(0.5) == round(0.5 + WAKE_STEP, 3)
+
+
+def test_an_instruction_about_a_fixed_rule_domain_is_never_promised(tmp_path, caplog):
+    """Consigne Discord du 4 novembre 2026 : « je m'y tiendrai », puis ignorée (Discord ne passe pas par le LLM).
+    ORION la garde, mais dit honnêtement qu'il ne peut pas la promettre, et le signale au journal."""
+    import logging
+
+    from orion.learning import learning_tools
+
+    tool = next(t for t in learning_tools(make(tmp_path)) if t.name == "add_instruction")
+    style = tool.execute({"instruction": "réponds-moi plus brièvement"})
+    assert style["domain"] == "" and tool.say(style).startswith("C'est noté, monsieur, je m'y tiendrai")
+    with caplog.at_level(logging.WARNING):
+        discord = tool.execute({"instruction": "quand je dis connecte moi en vocal, connecte moi dans le salon général"})
+    said = tool.say(discord)
+    assert discord["domain"] == "Discord" and "je ne peux pas vous promettre" in said and "je m'y tiendrai" not in said
+    assert "hors d'atteinte" in caplog.text and "salon" not in caplog.text  # le journal ne recopie pas la consigne
+    address = tool.execute({"instruction": "appelle-moi monsieur"})
+    assert address["domain"] == ""  # une consigne de style, pas un appel téléphonique

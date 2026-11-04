@@ -480,6 +480,14 @@ class KnowledgeConfig:
 
 
 @dataclass(frozen=True)
+class MissionsConfig:
+    """MISSIONS (docs/v3/missions.md, lot M1) : vos missions, plan scellé (lot F4) ; sans la clé, le module reste
+    actif mais verrouillé. Création, validation et lancement : vous seul."""
+    enabled: bool = False
+    refresh_seconds: float = 60.0  # suivi des étapes d'après leurs tâches F2
+
+
+@dataclass(frozen=True)
 class DiscordConfig:
     """DISCORD (docs/v3/discord.md) : Discord Desktop du PC piloté par le RPC local officiel, via l'agent Windows V3
     (son jeton dans ``token_env`` du .env, jamais celui de la production)."""
@@ -559,6 +567,7 @@ class Config:
     fragfactory: FragFactoryConfig = FragFactoryConfig()
     discord: DiscordConfig = DiscordConfig()
     knowledge: KnowledgeConfig = KnowledgeConfig()
+    missions: MissionsConfig = MissionsConfig()
     users: dict = field(default_factory=dict)
     terminals: dict = field(default_factory=dict)
 
@@ -692,6 +701,7 @@ def load_config(path: str | Path = "config.toml", local: bool = True) -> Config:
         "sentinel": SentinelConfig,
         "discord": DiscordConfig,
         "knowledge": KnowledgeConfig,
+        "missions": MissionsConfig,
         "purchase": PurchaseConfig,
         "fragfactory": FragFactoryConfig,
     }

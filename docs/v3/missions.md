@@ -1,7 +1,27 @@
 # ORION MISSIONS : analyse architecturale (étape 5)
 
-État au 4 novembre 2026 : **analyse et noyau de planification** (`orion/missions/plan.py`,
-`tests/test_missions_plan.py`). Rien n'est encore branché sur le Core : aucune mission ne s'exécute.
+État au 4 novembre 2026 : **lot M1 livré** (`orion/missions/module.py`, `tests/test_missions_module.py`), sur le
+noyau de planification (`orion/missions/plan.py`). Dans la V3 en service, le module est actif mais **verrouillé** tant
+que la vraie clé de données (F4) n'existe pas : les textes d'une mission sont personnels et ne sont jamais écrits en
+clair. M2 (création à la voix, plan proposé par le LLM) n'est pas commencé.
+
+## 0. Lot M1 : ce qui est en place
+
+| Élément | Comportement |
+|---|---|
+| Stockage | base opérationnelle, table `missions` ; plan entier scellé (aad `missions:<id>:plan`) ; en clair seulement l'état, la révision, les compteurs et les dates ; clé absente : rien n'est écrit (423) |
+| Cycle | `draft` (votre validation du plan) -> `active` -> `finished` ou `cancelled` |
+| Décisions | création, validation du plan, lancement, validation d'une étape sensible, étape humaine faite, annulation : `user`, `voix` ou `control` seulement ; chacune au registre, sans texte |
+| Lancement | sur votre action seulement : chaque étape prête devient une tâche F2 `schedule_for_user` (principal `delegated:<type>:<tâche>`, décidée par F1 au moment d'agir), clé de déduplication `missions:<id>:<étape>:r<révision>` |
+| Suivi | `missions:refresh` (60 s, `delegated:missions:suivi`, NOTIFY) : états d'après F2, blocages qui vous attendent annoncés une fois (`missions.blocked`, privé), fin annoncée (`missions.finished`) ; il ne crée, ne relance ni n'annule aucune tâche ; rien n'est réécrit si rien ne change |
+| Annulation | mission annulée, ses tâches encore actives annulées (coopératif F2) |
+| Vérification d'un plan | graphe sans cycle, dépendances connues, identifiant et titre, type de tâche **existant** pour toute action ou vérification, champs d'étape limités |
+| ORION Control | `GET /api/modules/missions`, `POST /api/modules/missions` (brouillon), `GET …/<id>`, `POST …/<id>/approve`, `…/launch`, `…/cancel`, `…/steps/<étape>/approve`, `…/steps/<étape>/complete` |
+| Configuration | `[missions] enabled`, `refresh_seconds` |
+
+Écart avec l'analyse : le principal d'une étape est celui que F2 donne à toute tâche que vous programmez
+(`delegated:<type>:<tâche>`), pas `delegated:mission:<id>` ; la mission n'a pas de principal propre, donc aucun droit
+à elle.
 
 ## 1. Objectif
 
@@ -82,7 +102,7 @@ objectif dit ──► proposition de plan (LLM, schéma) ──► Plan.validat
 
 | Lot | Contenu | Dépend de |
 |---|---|---|
-| M1 | Module `missions` : stockage scellé des plans, `refresh` périodique d'après F2, routes d'ORION Control (plan, valider, terminer une étape humaine, annuler), événement `mission.blocked` | ce noyau, F2, F3 |
+| M1 (livré) | Module `missions` : stockage scellé des plans, suivi périodique d'après F2, routes d'ORION Control (plan, valider, lancer, terminer une étape humaine, annuler), événements `missions.blocked` et `missions.finished` | ce noyau, F2, F3 |
 | M2 | Création à la voix et dans ORION Control ; proposition de plan par `StructuredLLM`, avec schéma et validation ; vous corrigez et validez | M1 |
 | M3 | Types de tâches utiles aux missions (lectures : météo, Web, agenda, KNOWLEDGE ; rappels, notes), avec leurs capacités déclarées | M1, F2 |
 | M4 | Adaptation : sur un blocage, proposition de révision (`revise`) soumise à votre accord | M2 |

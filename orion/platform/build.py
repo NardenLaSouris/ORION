@@ -94,7 +94,9 @@ JOB_CLASSES = {"news:bulletins": ("delegated:news:bulletins", Capability.NOTIFY.
                "fragfactory:report": ("delegated:fragfactory:report", Capability.NOTIFY.value),
                "discord:poll": ("module:discord", Capability.READ.value),
                # Conservation des connaissances : règle que vous avez fixée (décision n° 2), pas une initiative.
-               "knowledge:retention": ("delegated:knowledge:retention", Capability.WRITE_DATA.value)}
+               "knowledge:retention": ("delegated:knowledge:retention", Capability.WRITE_DATA.value),
+               # Suivi de vos missions (états d'après les tâches, blocages annoncés) : il ne lance rien.
+               "missions:refresh": ("delegated:missions:suivi", Capability.NOTIFY.value)}
 
 
 def classify_job(job_id: str) -> tuple[str, str]:
@@ -117,7 +119,7 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
     """``foundation`` (CORE FOUNDATION F1, facultatif) : alertes, achats et EVOLVE soumis au moteur central ; le
     planificateur s'arrête net sur arrêt d'urgence."""
     wanted = [name for name in ("watch", "news", "evolve", "purchase", "sentinel", "fragfactory", "discord",
-                                       "knowledge")
+                                       "knowledge", "missions")
               if getattr(cfg, name).enabled]
     if not wanted:
         return None
@@ -286,6 +288,15 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                         decide=permits.decide, scheduler=scheduler,
                                         settings=KnowledgeSettings(cfg.knowledge.retention_hours))
             registry.register(knowledge)
+    if "missions" in wanted:
+        if foundation is None:
+            log.warning("MISSIONS : sans CORE FOUNDATION (tâches F2) : module non démarré")
+        else:
+            from orion.missions import MissionsModule
+
+            registry.register(MissionsModule(foundation.store, foundation.tasks, events=foundation.events,
+                                             ledger=foundation.ledger, scheduler=scheduler,
+                                             refresh_seconds=cfg.missions.refresh_seconds))
     modules = V3Modules(store, scheduler, alerts, registry, tools)
     modules.contexts = contexts
     modules.knowledge = registry.get("knowledge")  # interface tracée pour les modules (reader(principal))

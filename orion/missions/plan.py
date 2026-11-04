@@ -85,8 +85,10 @@ class Plan:
         for s in self.steps:
             if s.kind not in STEP_KINDS:
                 raise PlanError(f"étape {s.id} : nature inconnue {s.kind!r}")
-            if s.kind == "action" and not s.task_kind:
-                raise PlanError(f"étape {s.id} : une action désigne son type de tâche")
+            if s.kind in ("action", "check") and not s.task_kind:
+                raise PlanError(f"étape {s.id} : une action ou une vérification désigne son type de tâche")
+            if not s.id or not s.title:
+                raise PlanError("chaque étape a un identifiant et un titre")
             missing = [d for d in s.after if d not in known]
             if missing:
                 raise PlanError(f"étape {s.id} : dépendance inconnue {', '.join(missing)}")

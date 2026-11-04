@@ -68,7 +68,7 @@ Réglages recopiés de la V2 sur votre accord (ancienne configuration : `config.
 | Autorisation | les **clés locales** sont celles des ampoules (fixées à l'appairage) : votre accord explicite pour les reprendre de la V2, ou un réappairage (nouvelles clés) |
 | Essai | « allume la chambre », « éteins tout » |
 
-### 2.5 Spotify
+### 2.5 Spotify : FAIT le 4 novembre à 12:28 (reste : essai d'écoute réel)
 
 | | |
 |---|---|
@@ -79,7 +79,7 @@ Réglages recopiés de la V2 sur votre accord (ancienne configuration : `config.
 | Autorisation | `SPOTIFY_CLIENT_ID` (identifiant de votre application Spotify) : votre accord pour le reprendre, ou une nouvelle application ; puis **une nouvelle connexion Spotify** pour la V3 (`python -m orion --spotify-login` sur le Core, vous acceptez dans le navigateur) ; le jeton de la V2 n'est jamais repris |
 | Essai | « mets de la musique », pause, volume |
 
-### 2.6 Appels
+### 2.6 Appels : FAIT à 12:28 (règles d'appel reprises ; reste : appel d'essai réel)
 
 | | |
 |---|---|

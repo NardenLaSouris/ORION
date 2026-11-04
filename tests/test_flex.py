@@ -206,3 +206,12 @@ def test_flex_sent_after_leaving_is_not_blocked_by_the_home_presentation(tmp_pat
     assert w.rules.trigger_flex() == "home"
     w.presence.users["owner"].state = "AWAY"  # « je sors » juste après
     assert w.rules.trigger_flex() == "waiting"
+
+
+def test_a_flex_rule_can_be_described_and_listed(tmp_path):
+    """La règle Flex (déclencheur « manual ») plantait la description, donc « liste mes règles d'appel » entier
+    (KeyError 'event', constaté le 4 novembre 2026 sur les règles reprises de la V2)."""
+    w = world(tmp_path)
+    entry = next(e for e in w.rules.rules if e.get("id") == "flex")
+    text = w.rules.describe(entry)
+    assert text.startswith("vous présenter mes capacités quand vous me le demandez")

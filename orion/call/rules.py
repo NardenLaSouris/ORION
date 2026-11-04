@@ -227,7 +227,9 @@ def describe_rule(rule: dict, labels: dict | None = None) -> str:
     labels = labels or {}
     verb = "vous appeler" if rule["channel"] == "call" else "vous écrire"
     trigger = rule["trigger"]
-    if trigger["type"] == "at":
+    if trigger["type"] == "manual":  # règle « Flex » : présentation déclenchée sur votre demande, sans événement
+        head = "faire la présentation d'ORION (mode Flex) quand vous la demandez"
+    elif trigger["type"] == "at":
         when = datetime.fromisoformat(trigger["at"])
         head = f"{verb} le {when:%d/%m} à {when:%H:%M}"
     else:

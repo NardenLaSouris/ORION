@@ -28,6 +28,20 @@ DISQUALIFIERS = re.compile(r"\b(quand|lorsque|si|sauf|chaque|tous les|toutes les
 # « et demie », « et quart », « vingt et un » ne séparent pas deux commandes.
 SPLIT = re.compile(r"\s*(?:,|;|\bet puis\b|\bet\b(?!\s+(?:demie?|quart|une?)\b)|\bpuis\b|\bensuite\b)\s*",
                    re.IGNORECASE)
+QUOTE_SPAN = re.compile(r"«[^»]*»|“[^”]*”|\"[^\"]*\"")
+
+
+def split_request(text: str) -> list[str]:
+    """Parties d'une demande enchaînée ; un nom entre guillemets n'est jamais coupé (5 novembre 2026 : « Connecte-moi
+    dans Général sur « Et le Zombie avec ou sans ?? » » coupé au « Et » du nom du serveur)."""
+    spans: list[str] = []
+
+    def keep(match: re.Match) -> str:
+        spans.append(match.group(0))
+        return f"\x00{len(spans) - 1}\x00"
+
+    parts = SPLIT.split(QUOTE_SPAN.sub(keep, text))
+    return [re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], part) for part in parts]
 
 LIGHT_WORDS = ("lumiere", "lumieres", "lampe", "lampes", "ampoule", "ampoules", "eclairage", "luminosite")
 ON_VERBS = ("allume", "allumer", "rallume", "rallumer", "allumes")
@@ -715,7 +729,7 @@ class QuickPlanner:
             whole = self.one(text)
             if whole is not None and whole.get("tool") == "set_face_theme":
                 return whole
-        segments = [s for s in SPLIT.split(text) if normalize(s) and normalize(s) not in names]
+        segments = [s for s in split_request(text) if normalize(s) and normalize(s) not in names]
         if not segments:
             return None
         if len(segments) == 1:

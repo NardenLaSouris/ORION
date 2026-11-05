@@ -17,7 +17,9 @@ Règles :
   demande) ; une erreur ou une indisponibilité est rendue telle quelle, jamais maquillée en succès ;
 - agent hors ligne : le module reste actif, déclare son état (« agent du PC hors ligne depuis… ») et ce qui ne
   marche plus ; il retrouve l'état dès que l'agent revient (sondage ``poll_seconds``).
-- noms des participants : en mémoire seulement (jamais en base ni au registre).
+- noms des participants : en mémoire seulement (jamais en base ni au registre) ;
+- surnoms de serveurs (« Le Zombie » pour « Et le Zombie avec ou sans ?? ») : donnés seulement par vous, gardés dans
+  ``discord_aliases.json`` (identifiant et nom du serveur, jamais rien d'autre).
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ OPENING = ("unmute", "undeafen")  # rouvrent le micro ou le son : jamais d'une i
 OFFLINE, ONLINE = "hors ligne", "en ligne"
 # Erreurs qui sont une question (« Quel salon ? », « sur A ou sur B ? ») : votre réponse suivante complète la demande.
 QUESTIONS = ("channel_missing", "channel_ambiguous", "guild_ambiguous")
+MAX_ALIASES = 50
 # « Connecte-moi en vocal » : « vocal » n'est pas le nom d'un salon (5 novembre 2026 : « Vocal Animation » choisi).
 GENERIC_SALONS = {"vocal", "le vocal", "en vocal", "voc", "salon", "salon vocal", "le salon", "discord", "vocal discord",
                   "un vocal", "un salon", "un salon vocal", "moi", "toi"}
@@ -68,8 +71,9 @@ class DiscordEngine(BaseModule):
 
     def __init__(self, agent: AgentLink, *, scheduler: Scheduler | None = None,
                  decide: Callable[..., Any] | None = None, ledger=None, settings: DiscordSettings | None = None,
-                 clock: Callable[[], float] = time.time, seen_path=None):
+                 clock: Callable[[], float] = time.time, seen_path=None, aliases_path=None):
         self._agent, self._decide, self._ledger = agent, decide, ledger
+        self._aliases_path = aliases_path  # surnoms de serveurs que vous avez donnés
         self._seen_path = seen_path  # salons où ORION vous a vu : gardés d'un démarrage à l'autre
         self._clock = clock
         self._scheduler = scheduler or Scheduler(clock)
@@ -81,6 +85,7 @@ class DiscordEngine(BaseModule):
         self._last_seq = 0
         self._events: deque[dict] = deque(maxlen=self.settings.events_kept)
         self._directory: tuple[float, list[dict]] | None = None
+        self._aliases: dict[str, dict] = self._load_aliases()  # surnom (comparable) -> {id, name, said}
 
     # --- Cycle de vie ---------------------------------------------------------------------------------------
 
@@ -182,8 +187,9 @@ class DiscordEngine(BaseModule):
             verdict = self._decide(principal, "CONTROL_DEVICE", {"device": "discord"}, action=f"discord:{action}")
             if not verdict.allowed:
                 return self._out(False, f"Action refusée : {verdict.reason}.")
+        salon, serveur = self._unaliased(salon.strip(), serveur.strip())
         try:
-            text = self._run(action, salon.strip(), serveur.strip(), channel_id)
+            text = self._run(action, salon, serveur, channel_id)
         except DiscordUnavailable as exc:
             self._record(principal, f"discord.{action}", False, f"{exc.code} : {exc.message}"[:160])
             return self._out(False, self._explain(exc), exc.code)
@@ -267,7 +273,7 @@ class DiscordEngine(BaseModule):
                 raise
             place = [w for w in words[cuts[-1] + 1:] if w not in ("le", "la", "les", "l", "serveur")]
             try:
-                return self._resolve(" ".join(words[:cuts[-1]]), " ".join(place))
+                return self._resolve(" ".join(words[:cuts[-1]]), self._real_name(" ".join(place)))
             except DiscordUnavailable:
                 raise exc from None
 
@@ -346,6 +352,97 @@ class DiscordEngine(BaseModule):
         listed = ", ".join(names[:-1]) + " ou " + names[-1]
         raise DiscordUnavailable("channel_missing", f"Quel salon sur {spoken(guild['name'])} : {listed} ?")
 
+    # --- Surnoms de serveurs ------------------------------------------------------------------------------------
+
+    def _real_name(self, serveur: str) -> str:
+        """Nom réel du serveur si ``serveur`` est un de vos surnoms, sinon ``serveur`` inchangé."""
+        entry = self._aliases.get(alias_key(serveur))
+        return entry["name"] if entry else serveur
+
+    def _unaliased(self, salon: str, serveur: str) -> tuple[str, str]:
+        """Surnoms remplacés par le nom réel du serveur : « sur Le Zombie », « connecte-moi au Zombie » (le surnom
+        dit à la place du salon : le serveur), « Général sur Le Zombie »."""
+        if serveur:
+            return salon, self._real_name(serveur)
+        if not salon:
+            return salon, serveur
+        if alias_key(salon) in self._aliases:
+            return "", self._real_name(salon)
+        words = salon.split()
+        for i in range(len(words) - 1, 0, -1):
+            if normalize(words[i]) == "sur" and alias_key(" ".join(words[i + 1:])) in self._aliases:
+                return " ".join(words[:i]), self._real_name(" ".join(words[i + 1:]))
+        return salon, serveur
+
+    def aliases(self) -> list[dict]:
+        return [{"surnom": v["said"], "serveur": v["name"]} for v in self._aliases.values()]
+
+    def set_alias(self, serveur: str, surnom: str, principal: str = "user") -> dict:
+        """Donne un surnom à un serveur (connu de la liste de Discord ou des salons où ORION vous a vu)."""
+        surnom, key = " ".join(str(surnom).split())[:40], alias_key(surnom)
+        if not key:
+            return self._out(False, "Quel surnom voulez-vous donner ?")
+        real = self._real_name(serveur)
+        try:
+            guilds = self._guilds_named(self.directory(), real)
+        except DiscordUnavailable as exc:
+            # Serveur absent de la liste, ou agent du PC injoignable : les salons où ORION vous a vu.
+            seen = {g["id"]: g for g, _ in self._seen.values() if _matches(label(g["name"]), label(real))}
+            if not seen:
+                return self._out(False, f"Je ne trouve pas le serveur « {serveur} »." if exc.code == "guild_not_found"
+                                 else self._explain(exc), exc.code)
+            guilds = list(seen.values())
+        if len({g["id"] for g in guilds}) > 1:
+            names = sorted({spoken(g["name"]) for g in guilds})
+            return self._out(False, "Plusieurs serveurs : " + " ou ".join(names[:3]) + " ?", "guild_ambiguous")
+        guild = guilds[0]
+        known = self._directory[1] if self._directory else []
+        if any(alias_key(g["name"]) == key and g["id"] != guild["id"] for g in known):
+            return self._out(False, f"« {surnom} » est déjà le nom d'un autre serveur.")
+        if key not in self._aliases and len(self._aliases) >= MAX_ALIASES:
+            return self._out(False, f"Vous avez déjà {MAX_ALIASES} surnoms : oubliez-en un d'abord.")
+        self._aliases[key] = {"id": str(guild["id"]), "name": guild["name"], "said": surnom}
+        self._save_aliases()
+        self._record(principal, "discord.alias", True, "surnom de serveur ajouté", "WRITE_DATA")
+        return self._out(True, f"C'est noté : « {surnom} » désigne désormais le serveur {spoken(guild['name'])}.")
+
+    def forget_alias(self, surnom: str, principal: str = "user") -> dict:
+        entry = self._aliases.pop(alias_key(surnom), None)
+        if entry is None:
+            return self._out(False, f"Je n'ai pas de surnom « {surnom} ».")
+        self._save_aliases()
+        self._record(principal, "discord.alias", True, "surnom de serveur oublié", "WRITE_DATA")
+        return self._out(True, f"J'ai oublié le surnom « {entry['said']} » ({spoken(entry['name'])}).")
+
+    def alias_summary(self) -> str:
+        if not self._aliases:
+            return "Vous n'avez donné aucun surnom à vos serveurs Discord."
+        items = [f"« {v['said']} » pour {spoken(v['name'])}" for v in self._aliases.values()]
+        return "Surnoms de serveurs : " + ", ".join(items) + "."
+
+    def _load_aliases(self) -> dict:
+        import json
+
+        try:
+            data = json.loads(self._aliases_path.read_text(encoding="utf-8")) if self._aliases_path else {}
+            return {alias_key(v["said"]): {"id": str(v["id"]), "name": str(v["name"]), "said": str(v["said"])}
+                    for v in data.values() if alias_key(v["said"])}
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return {}
+
+    def _save_aliases(self) -> None:
+        if not self._aliases_path:
+            return
+        import json
+        import os
+
+        try:
+            tmp = self._aliases_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._aliases, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self._aliases_path)
+        except OSError:
+            log.warning("Discord : surnoms de serveurs non enregistrés")
+
     def _apply(self, remote: dict) -> dict:
         if isinstance(remote, dict) and "discord" in remote:
             with self._lock:
@@ -398,14 +495,14 @@ class DiscordEngine(BaseModule):
                     return guild, channel
             raise
 
-    def _record(self, principal: str, action: str, done: bool, reason: str) -> None:
+    def _record(self, principal: str, action: str, done: bool, reason: str, capability: str = "CONTROL_DEVICE") -> None:
         if self._ledger is None:
             return
         from orion import trace
 
         try:
             self._ledger.append(principal if principal in TRUSTED or ":" in principal else "module:discord",
-                                "CONTROL_DEVICE", action, "allow" if done else "deny", reason,
+                                capability, action, "allow" if done else "deny", reason,
                                 trace.current() or "", {"device": "discord"})
         except Exception:  # noqa: BLE001 - le résultat est aussi dans le journal
             log.exception("Discord : registre d'actions indisponible")
@@ -500,6 +597,14 @@ def spoken(name: str) -> str:
     text = unicodedata.normalize("NFKC", name or "")
     kept = "".join(c if unicodedata.category(c)[0] in "LNZ" or c in "'’-&+.,!?" else " " for c in text)
     return " ".join(kept.split()) or (name or "").strip()
+
+
+def alias_key(name: str) -> str:
+    """Surnom comparable : « Le Zombie », « le zombie », « au Zombie » donnent « zombie »."""
+    words = label(name).split()
+    while words and words[0] in ("le", "la", "les", "l", "au", "aux", "serveur", "sur"):
+        words.pop(0)
+    return " ".join(words)
 
 
 def _search(guilds: list[dict], wanted: str) -> list[tuple[int, dict, dict]]:

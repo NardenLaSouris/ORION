@@ -877,3 +877,79 @@ def test_a_channel_question_becomes_a_follow_up_for_the_tool_core():
     with pytest.raises(ToolError) as err:
         join.execute({"salon": "cuisine"})
     assert err.value.code == "execution_failed"  # introuvable : pas une question
+
+
+# --- 5 novembre 2026 (journal Linphone, après a789bbb) ---------------------------------------------------------------
+
+
+def test_a_quoted_name_containing_et_is_never_cut_into_two_requests():
+    """« Connecte moi en vocal dans Général sur « Et le Zombie avec ou sans ?? » » était coupée au « Et » du nom :
+    le serveur était perdu et le LLM ne gardait que « Général »."""
+    from orion.discord.tools import discord_tools
+    from orion.tools.quick import quick_plan, split_request
+    from orion.tools.registry import ToolRegistry
+
+    assert split_request("dans « Et le Zombie » et lance fortnite") == ["dans « Et le Zombie »", "lance fortnite"]
+    engine, _, _ = engine_with()
+    registry = ToolRegistry()
+    for tool in discord_tools(engine):
+        registry.register(tool)
+    plan = quick_plan("Connecte moi en vocal dans Général sur « Et le Zombie avec ou sans ?? »", registry)
+    assert plan == {"type": "tool_call", "tool": "discord_join",
+                    "parameters": {"salon": "general", "serveur": "et le zombie avec ou sans"}}
+    assert discord_plan("Connecte moi en vocal sur « Et le Zombie avec ou sans ?? »", lambda n: True) == \
+        ("discord_join", {"serveur": "et le zombie avec ou sans"})
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Surnomme le serveur « Et le Zombie avec ou sans ?? » en « Le Zombie »",
+     ("discord_alias", {"serveur": "Et le Zombie avec ou sans ??", "surnom": "Le Zombie"})),
+    ("Donne le surnom « Le Zombie » au serveur « Et le Zombie avec ou sans ?? »",
+     ("discord_alias", {"serveur": "Et le Zombie avec ou sans ??", "surnom": "Le Zombie"})),
+    ("Surnomme le serveur pool club en club", ("discord_alias", {"serveur": "pool club", "surnom": "club"})),
+    ("Oublie le surnom « Le Zombie »", ("discord_forget_alias", {"surnom": "Le Zombie"})),
+    ("Quels sont mes surnoms de serveurs ?", ("discord_aliases", {})),
+    ("Surnomme Paul en Polo", None),  # ni serveur ni Discord : jamais un surnom de serveur
+    ("Que tu ajoute un surnom à un serveur discord pour simplifier les instructions", None),
+    ("Ajoute un surnom à un serveur discord pour simplifier les instructions", None),
+])
+def test_server_nicknames_are_understood(text, expected):
+    assert discord_plan(text, lambda n: True) == expected
+
+
+def test_a_server_nickname_is_used_to_join_and_survives_a_restart(tmp_path):
+    path = tmp_path / "discord_aliases.json"
+    agent = FakeAgent()
+    agent.guilds.append({"id": "555", "name": "Et le Zombie avec ou sans ??",
+                         "channels": [{"id": "556", "name": "Général"}, {"id": "557", "name": "Chill"}]})
+    engine = DiscordEngine(agent, ledger=Ledger(), settings=DiscordSettings(), aliases_path=path)
+    engine.poll()
+    result = engine.set_alias("Et le Zombie avec ou sans ??", "Le Zombie")
+    assert result["ok"] and "Le Zombie" in result["text"] and "Et le Zombie avec ou sans ??" in result["text"]
+    assert engine.set_alias("Travail", "amis")["text"] == "« amis » est déjà le nom d'un autre serveur."
+    assert engine.set_alias("Cuisine", "cui")["text"] == "Je ne trouve pas le serveur « Cuisine »."
+
+    again = DiscordEngine(agent, ledger=Ledger(), settings=DiscordSettings(), aliases_path=path)
+    again.poll()
+    assert again.aliases() == [{"surnom": "Le Zombie", "serveur": "Et le Zombie avec ou sans ??"}]
+    assert again.act("join", salon="general", serveur="le zombie")["text"] == \
+        "Vous avez rejoint Général sur Et le Zombie avec ou sans ??."
+    assert again.act("join", salon="chill sur le zombie")["ok"]  # « Chill sur Le Zombie »
+    assert agent.calls[-1] == ("discord_join", {"channel_id": "557", "force": True})
+    asked = again.act("join", salon="zombie")  # le surnom seul : le serveur, puis « quel salon ? »
+    assert asked["ok"] or asked["code"] == "channel_missing"
+    assert again.forget_alias("le zombie")["ok"] and again.aliases() == []
+    assert again.forget_alias("le zombie")["ok"] is False
+
+
+def test_nickname_tools_record_and_never_hide_a_failure(tmp_path):
+    from orion.discord.tools import discord_tools
+
+    engine, _, ledger = engine_with()
+    tools = {t.name: t for t in discord_tools(engine)}
+    assert tools["discord_alias"].capability == "WRITE_DATA" and tools["discord_aliases"].capability == "READ"
+    assert tools["discord_alias"].execute({"serveur": "Travail", "surnom": "boulot"})["text"].startswith("C'est noté")
+    assert ("user", "WRITE_DATA", "discord.alias", "allow", "surnom de serveur ajouté") in ledger.rows
+    assert "boulot" in tools["discord_aliases"].execute({})["text"]
+    with pytest.raises(ToolError):
+        tools["discord_forget_alias"].execute({"surnom": "inconnu"})

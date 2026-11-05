@@ -32,6 +32,18 @@ def discord_tools(engine: DiscordEngine) -> list[Tool]:
         engine.poll()
         return {"text": engine.participants()}
 
+    def alias(serveur: str, surnom: str) -> dict:
+        result = engine.set_alias(serveur, surnom)
+        if not result["ok"]:
+            raise ToolError(NEEDS_DETAILS if result.get("code") in QUESTIONS else EXECUTION_FAILED, result["text"])
+        return {"text": result["text"]}
+
+    def forget(surnom: str) -> dict:
+        result = engine.forget_alias(surnom)
+        if not result["ok"]:
+            raise ToolError(EXECUTION_FAILED, result["text"])
+        return {"text": result["text"]}
+
     say = lambda r: r["text"]  # noqa: E731
     out = {"text": "réponse"}
     control = "CONTROL_DEVICE"
@@ -46,6 +58,15 @@ def discord_tools(engine: DiscordEngine) -> list[Tool]:
               "serveur": Param(str, "nom du serveur, seulement s'il est dit", required=False, max_length=100,
                                evidence=_said)},
              out, Risk.SAFE, act("join"), say=say, capability=control),
+        Tool("discord_alias", "Discord : donne un surnom à un serveur (« surnomme le serveur X en Y »).",
+             {"serveur": Param(str, "nom du serveur tel qu'il a été dit", max_length=100, evidence=_said),
+              "surnom": Param(str, "surnom dit", max_length=40, evidence=_said)},
+             out, Risk.SAFE, alias, say=say, capability="WRITE_DATA"),
+        Tool("discord_forget_alias", "Discord : oublie un surnom de serveur.",
+             {"surnom": Param(str, "surnom dit", max_length=40, evidence=_said)},
+             out, Risk.SAFE, forget, say=say, capability="WRITE_DATA"),
+        Tool("discord_aliases", "Discord : liste les surnoms de serveurs.", {}, out, Risk.SAFE,
+             lambda: {"text": engine.alias_summary()}, say=say, capability="READ"),
         Tool("discord_leave", "Discord : quitte le salon vocal.", {}, out, Risk.SAFE, act("leave"), say=say,
              capability=control),
         Tool("discord_mute", "Discord : coupe mon micro (mute).", {}, out, Risk.SAFE, act("mute"), say=say,

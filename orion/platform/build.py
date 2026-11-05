@@ -296,7 +296,8 @@ def build_v3(cfg, *, events=None, llm=None, presence=None, notifications=None,
                                                              undeafen_keeps_mute=d.undeafen_keeps_mute,
                                                              default_salon=d.default_salon,
                                                              default_serveur=d.default_serveur),
-                                    seen_path=Path(m.database).with_name("discord_seen.json"))
+                                    seen_path=Path(m.database).with_name("discord_seen.json"),
+                                    aliases_path=Path(m.database).with_name("discord_aliases.json"))
             registry.register(discord)
             tools += discord_tools(discord)
             contexts["discord.deafened"] = discord.deafened

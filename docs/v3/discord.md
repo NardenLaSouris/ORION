@@ -89,6 +89,12 @@ ORION Control, vue Discord -> /api/modules/discord/... -> même module, même mo
   complète la demande, pendant 3 minutes : « Général sur Et le Zombie », « sur GTA France », « Chill ». Une nouvelle
   demande reconnue (« lance Fortnite ») reste une nouvelle demande. Dans une demande enchaînée (« mute-moi, connecte-moi
   en vocal et lance Fortnite »), la question est posée à la fin et la suite n'attend pas.
+- **Noms entre guillemets.** Un nom écrit entre guillemets n'est jamais coupé : « Connecte-moi dans Général sur « Et le
+  Zombie avec ou sans ?? » » garde le serveur entier (avant, le « Et » du nom coupait la demande en deux).
+- **Surnoms de serveurs.** « Surnomme le serveur « Et le Zombie avec ou sans ?? » en « Le Zombie » » (ou « donne le
+  surnom … au serveur … ») ; ensuite « connecte-moi en vocal sur le Zombie », « Général sur le Zombie ». « Quels sont
+  mes surnoms de serveurs ? », « oublie le surnom Le Zombie ». Un surnom n'est jamais le nom d'un autre serveur ; il
+  est gardé dans `discord_aliases.json` (identifiant et nom du serveur seulement), inscrit au registre d'actions.
 - **Événements.** L'agent suit les changements de salon, les arrivées et départs des participants, les changements
   de micro et de sourdine, et la fermeture ou le retour de Discord. Ils sont affichés dans ORION Control et ne sont
   jamais annoncés à voix haute.

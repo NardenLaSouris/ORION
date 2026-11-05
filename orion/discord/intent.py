@@ -73,6 +73,9 @@ def discord_plan(text: str, exists: Callable[[str], bool], deafened: Callable[[]
     norm = re.sub(r"^(?:orion|jarvis)\s+", "", norm)
     if not norm:
         return None
+    alias = _alias_plan(raw, norm, exists)
+    if alias is not None:
+        return alias
     about = bool(DISCORD_WORDS.search(norm))
     question = raw.endswith("?") or bool(QUESTION.match(norm))
     if question:
@@ -107,12 +110,55 @@ def discord_plan(text: str, exists: Callable[[str], bool], deafened: Callable[[]
         split = SERVER_SPLIT.search(rest)
         if split:
             rest, server = rest[:split.start()], _name(rest[split.end():])
+        else:
+            # « dans Général sur « Et le Zombie avec ou sans ?? » » : le nom entre guillemets après « sur » est le serveur.
+            tail = re.search(r"\bsur\s*[«“\"]\s*([^»”\"]+?)\s*[»”\"]\s*[.!]?\s*$", raw)
+            name = normalize(tail.group(1)) if tail else ""
+            cut = rest.rfind(f" sur {name} ") if name else -1
+            if cut >= 0:
+                rest, server = rest[:cut] + " ", name
         channel = _name(rest)
         if channel in ("", "moi", "toi"):
             # « connecte-moi en vocal » : votre salon habituel, sinon ORION demande lequel ; « … sur le serveur X » :
             # un salon de ce serveur (jamais un « salon » vide, refusé par l'outil : 5 novembre 2026).
             return "discord_join", ({"serveur": server} if server else {})
         return "discord_join", {"salon": channel, **({"serveur": server} if server else {})}
+    return None
+
+
+QUOTES = re.compile(r"«\s*([^»]+?)\s*»|“\s*([^”]+?)\s*”|\"\s*([^\"]+?)\s*\"")
+ALIAS_SET = re.compile(r"^(?:surnomme|renomme)\s+(?:le\s+)?(?:serveur\s+)?(?:discord\s+)?(?P<x>.+?)\s+"
+                       r"(?:en|comme|par)\s+(?P<y>.+)$")
+ALIAS_GIVE = re.compile(r"^(?:donne|ajoute|mets|met|attribue)\s+(?:le\s+|un\s+)?surnom\s+(?!(?:a|au|aux|pour)\s)"
+                        r"(?P<y>.+?)\s+(?:au|a|pour)\s+(?:le\s+)?(?:serveur\s+)?(?:discord\s+)?(?P<x>.+)$")
+ALIAS_FORGET = re.compile(r"^(?:oublie|supprime|retire|enleve|efface)\s+(?:le\s+)?surnom\s+(?P<y>.+)$")
+ALIAS_LIST = re.compile(r"\b(?:quels? sont (?:mes|les|tes) surnoms|liste (?:des |les |mes )?surnoms|"
+                        r"surnoms (?:de|des) (?:mes )?serveurs)\b")
+
+
+def _alias_plan(raw: str, norm: str, exists: Callable[[str], bool]) -> tuple[str, dict] | None:
+    """Surnoms de serveurs. Une demande sans « serveur » ni « Discord » n'en est jamais une (« surnomme Paul en
+    Polo » ne touche pas Discord). Les noms entre guillemets sont pris tels qu'écrits."""
+    if "surnom" not in norm or not exists("discord_alias"):
+        return None
+    quoted = [next(g for g in m.groups() if g) for m in QUOTES.finditer(raw)]
+    if ALIAS_LIST.search(norm):
+        return "discord_aliases", {}
+    forget = ALIAS_FORGET.match(norm)
+    if forget:
+        said = quoted[-1] if quoted else _name(forget.group("y"))
+        return ("discord_forget_alias", {"surnom": said}) if said else None
+    if not re.search(r"\b(?:serveur|serveurs|discord)\b", norm):
+        return None
+    for pattern, server_first in ((ALIAS_SET, True), (ALIAS_GIVE, False)):
+        match = pattern.match(norm)
+        if not match:
+            continue
+        if len(quoted) >= 2:
+            server, nick = (quoted[0], quoted[1]) if server_first else (quoted[1], quoted[0])
+        else:
+            server, nick = _name(match.group("x")), _name(match.group("y"))
+        return ("discord_alias", {"serveur": server, "surnom": nick}) if server and nick else None
     return None
 
 

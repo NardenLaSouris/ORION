@@ -5,7 +5,10 @@ Description=ORION V3 : sauvegarde de la nuit des données (vérifiée, état pou
 
 [Service]
 Type=oneshot
-ExecStart=/opt/orion-v3/.venv/bin/python /opt/orion-v3/scripts/v3_backup.py periodic
+# sg : le gestionnaire systemd du compte user, lancé avant l'entrée de user dans le groupe orion-v3, n'a pas ce groupe
+# (5 novembre 2026 : données illisibles, « Permission denied ») ; sg le prend sans mot de passe, user en étant membre.
+# Le redémarrer (user@1000) l'aurait aussi corrigé, mais relance PulseAudio, dont dépend le son à distance.
+ExecStart=/usr/bin/sg orion-v3 -c "/opt/orion-v3/.venv/bin/python /opt/orion-v3/scripts/v3_backup.py periodic"
 Nice=10
 IOSchedulingClass=idle
 UMask=0077

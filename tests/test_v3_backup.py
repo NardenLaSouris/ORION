@@ -159,3 +159,28 @@ def test_the_pc_copy_is_read_only_on_the_core_and_verified():
     for line in text.splitlines():
         if "ssh.exe" in line:
             assert '"ls -1 $Remote' in line  # seule commande lancée sur le Core : une lecture
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "geteuid") or __import__("os").geteuid() == 0,
+                    reason="droits de fichier POSIX, compte non root")
+def test_unreadable_data_leaves_no_partial_backup_and_an_unwritable_status_never_crashes(tmp_path):
+    """5 novembre 2026 : le service de la nuit n'avait pas le groupe orion-v3 (bases illisibles, puis état impossible
+    à écrire, plantage). La sauvegarde ratée ne laisse plus de dossier vide, et l'échec est rendu, jamais levé."""
+    data, db = make_data(tmp_path)
+    db.close()
+    (data / "orion_v3.db").chmod(0)
+    locked = tmp_path / "verrouille"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        result = v3_backup.periodic(data, tmp_path / "out", locked / v3_backup.STATUS_NAME)
+    finally:
+        (data / "orion_v3.db").chmod(0o600)
+        locked.chmod(0o700)
+    assert result["ok"] is False and len(result["problems"]) == 2 and "état non écrit" in result["problems"][1]
+    assert list((tmp_path / "out" / "quotidiennes").iterdir()) == []
+
+
+def test_the_nightly_service_takes_the_orion_v3_group():
+    service = (ROOT / "deploy" / "orion-v3-backup.service").read_text(encoding="utf-8")
+    assert 'ExecStart=/usr/bin/sg orion-v3 -c "/opt/orion-v3/.venv/bin/python' in service

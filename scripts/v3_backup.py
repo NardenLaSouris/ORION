@@ -75,6 +75,18 @@ def backup(data: Path, out: Path, keep: int) -> Path:
     target = out / time.strftime("%Y-%m-%dT%H%M%S")
     target.mkdir(parents=True, exist_ok=False)
     target.chmod(0o700)
+    try:
+        _copy_all(data, target)
+    except BaseException:
+        shutil.rmtree(target, ignore_errors=True)  # sauvegarde incomplète, jamais laissée parmi les bonnes
+        raise
+    old = sorted(p for p in out.iterdir() if p.is_dir() and (p / "manifest.json").exists())
+    for stale in old[:-keep] if keep > 0 else []:
+        shutil.rmtree(stale)
+    return target
+
+
+def _copy_all(data: Path, target: Path) -> None:
     manifest = {"format": 1, "source": str(data), "created_at": time.time(), "files": {}, "excluded": []}
     for item in sorted(data.iterdir()):
         if not item.is_file() or item.name.endswith(SKIP) or item.name == STATUS_NAME:
@@ -97,10 +109,6 @@ def backup(data: Path, out: Path, keep: int) -> Path:
         copy.chmod(0o600)
         manifest["files"][item.name] = {"sha256": _sha256(copy), "bytes": copy.stat().st_size}
     (target / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
-    old = sorted(p for p in out.iterdir() if p.is_dir() and (p / "manifest.json").exists())
-    for stale in old[:-keep] if keep > 0 else []:
-        shutil.rmtree(stale)
-    return target
 
 
 def verify(folder: Path) -> list[str]:
@@ -204,7 +212,11 @@ def periodic(data: Path, out: Path, status_path: Path | None, keep: int = 14, we
     except (OSError, sqlite3.Error) as exc:
         status["problems"] = [f"{type(exc).__name__}: {exc}"[:300]]
     if status_path is not None:
-        write_status(status_path, status)
+        try:
+            write_status(status_path, status)
+        except OSError as exc:  # SENTINEL ne saura rien : la sortie vaut 1, le journal de systemd le dit
+            status["ok"] = False
+            status["problems"] = status["problems"] + [f"état non écrit ({status_path}) : {exc.strerror or exc}"]
     return status
 
 

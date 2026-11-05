@@ -373,3 +373,44 @@ def test_the_installed_list_is_read_once_then_cached():
     clock[0] = 121
     finder.find("c")
     assert len(calls) == 2
+
+
+def test_epic_games_are_launched_by_the_epic_launcher(tmp_path):
+    """« Lance Fortnite » (5 novembre 2026) : « Je ne trouve pas d'application » ; Fortnite vient d'Epic Games et ne se
+    lance que par le lanceur Epic. Contenus additionnels, modules et moteur Unreal ne sont pas des jeux à lancer."""
+    import json
+
+    from orion.tools.app_finder import epic_library
+
+    launcher = exe(tmp_path, "Epic Games/Launcher/EpicGamesLauncher.exe")
+    manifests = tmp_path / "Manifests"
+    manifests.mkdir()
+    items = {
+        "fortnite": {"DisplayName": "Fortnite", "AppName": "Fortnite", "CatalogNamespace": "fn",
+                     "CatalogItemId": "4fe75bbc5a674f4f9b356b5c90567da5", "bIsExecutable": True,
+                     "LaunchExecutable": "FortniteGame/Binaries/Win64/FortniteBootstrapper.exe",
+                     "AppCategories": ["games", "applications"]},
+        "rocket": {"DisplayName": "Rocket League®", "AppName": "Sugar", "CatalogNamespace": "9773aa1a",
+                   "CatalogItemId": "530145df", "bIsExecutable": True, "LaunchExecutable": "Binaries/Launcher.exe",
+                   "AppCategories": ["public", "games", "applications"]},
+        "dlc": {"DisplayName": "Contenu de LEGO Fortnite", "AppName": "94bc5ec1", "CatalogNamespace": "fn",
+                "CatalogItemId": "b619cf61", "bIsExecutable": False, "LaunchExecutable": "",
+                "AppCategories": ["hidden"]},
+        "ue": {"DisplayName": "Unreal Engine", "AppName": "UE_5.6", "CatalogNamespace": "ue",
+               "CatalogItemId": "73923380", "bIsExecutable": True, "LaunchExecutable": "Engine/UnrealEditor.exe",
+               "AppCategories": ["engines/ue5", "engines"]},
+        "piege": {"DisplayName": "Piège", "AppName": "x&calc", "CatalogNamespace": "a", "CatalogItemId": "b",
+                  "bIsExecutable": True, "LaunchExecutable": "a.exe", "AppCategories": ["games"]},
+    }
+    for name, item in items.items():
+        (manifests / f"{name}.item").write_text(json.dumps(item), encoding="utf-8")
+    games = epic_library(launcher, str(manifests))
+    assert sorted(g.label for g in games) == ["Fortnite", "Rocket League"]
+    fortnite = next(g for g in games if g.label == "Fortnite")
+    assert fortnite.argv == (launcher, "com.epicgames.launcher://apps/fn%3A4fe75bbc5a674f4f9b356b5c90567da5%3A"
+                                       "Fortnite?action=launch&silent=true")
+    assert fortnite.identity == "epic:Fortnite" and not fortnite.problem
+    core, calls = core_with(games)
+    assert opened(core, "fortnite").success and calls.calls[-1] == list(fortnite.argv)
+    blocked, calls = core_with(games, {"blocked_applications": {"epic": ["Fortnite"]}})
+    assert opened(blocked, "Fortnite").error == "application_blocked" and calls.calls == []

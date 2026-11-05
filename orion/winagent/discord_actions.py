@@ -36,8 +36,13 @@ def discord_actions(link: DiscordLink) -> list[Tool]:
     def events(since: int = 0) -> dict:
         return link.events(since)
 
-    def channels() -> dict:
-        return {"guilds": link.directory()}
+    def channels(guild_id: str = "", tous: bool = False) -> dict:
+        """Serveurs et salons vocaux ; ``guild_id`` : salons de ce serveur aussi ; ``tous`` : de tous vos serveurs."""
+        if tous:
+            ids = tuple(g["id"] for g in link.directory())
+        else:
+            ids = (_snowflake(guild_id),) if guild_id else ()
+        return {"guilds": link.directory(guild_ids=ids)}
 
     def join(channel_id: str, force: bool = False) -> dict:
         try:
@@ -70,7 +75,9 @@ def discord_actions(link: DiscordLink) -> list[Tool]:
         Tool("discord_events", "Changements depuis un numéro d'événement.",
              {"since": Param(int, "dernier événement connu", required=False, minimum=0)}, {"events": "liste"},
              Risk.SAFE, guarded(events)),
-        Tool("discord_channels", "Serveurs et salons vocaux.", {}, {"guilds": "liste"}, Risk.SAFE, guarded(channels)),
+        Tool("discord_channels", "Serveurs et salons vocaux.",
+             {"guild_id": Param(str, "serveur dont lire aussi les salons", required=False, max_length=22),
+              "tous": flag("salons de tous les serveurs")}, {"guilds": "liste"}, Risk.SAFE, guarded(channels)),
         Tool("discord_join", "Rejoint un salon vocal précis (identifiant).",
              {"channel_id": Param(str, "identifiant du salon", max_length=22, check=_snowflake),
               "force": flag("quitter le salon actuel pour celui-ci (demande explicite)")},

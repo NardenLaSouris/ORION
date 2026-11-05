@@ -1001,7 +1001,7 @@
       const people = voice ? voice.participants.map((p) => [p.name, p.mute ? "oui" : "non", p.deaf ? "oui" : "non"]) : [];
       const channels = el("div");
       const loadChannels = () => mod("discord", "/channels").then((r) => {
-        channels.replaceChildren(table(["Serveur", "Salon vocal", ""], r.guilds.flatMap((g) => g.channels.map((c) => [g.name, c.name,
+        channels.replaceChildren(table(["Serveur", "Salon vocal", ""], r.guilds.flatMap((g) => (g.channels || []).map((c) => [g.name, c.name,
           button("Rejoindre", () => run("join", { channel_id: c.id }))])), "Aucun salon vocal visible."));
       }).catch((error) => toast(error.message, "err"));
       view.replaceChildren(

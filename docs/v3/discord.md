@@ -79,6 +79,16 @@ ORION Control, vue Discord -> /api/modules/discord/... -> même module, même mo
 - **Rejoindre par le nom.** Les accents, la casse et les emojis sont ignorés, et un nom partiel suffit (« jeux » pour
   « Jeux vidéo »). Si deux salons portent le même nom, celui du serveur actuel l'emporte ; sinon, ORION demande
   lequel, jamais au hasard.
+- **Tous vos serveurs.** L'agent liste tous vos serveurs ; il lit d'office les salons des 25 premiers, et ceux des
+  autres quand un serveur est nommé ou qu'un salon reste introuvable (5 novembre 2026 : « Le Pool Club » était
+  introuvable, au-delà des 25 premiers).
+- **Serveur seul.** « Connecte-moi en vocal sur le serveur Le Pool Club » : son seul salon vocal, sinon ORION
+  demande lequel (« Quel salon sur Le Pool Club : On vomit à 5h ou Chill ? »). « Vocal » n'est jamais pris pour le
+  nom d'un salon.
+- **Réponse à une question.** Après « Quel salon ? » ou « Plusieurs salons… : sur A ou sur B ? », la réponse suivante
+  complète la demande, pendant 3 minutes : « Général sur Et le Zombie », « sur GTA France », « Chill ». Une nouvelle
+  demande reconnue (« lance Fortnite ») reste une nouvelle demande. Dans une demande enchaînée (« mute-moi, connecte-moi
+  en vocal et lance Fortnite »), la question est posée à la fin et la suite n'attend pas.
 - **Événements.** L'agent suit les changements de salon, les arrivées et départs des participants, les changements
   de micro et de sourdine, et la fermeture ou le retour de Discord. Ils sont affichés dans ORION Control et ne sont
   jamais annoncés à voix haute.

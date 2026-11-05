@@ -14,9 +14,8 @@ from typing import Callable
 from orion.call.rule_parser import RuleParser, RuleQuestion
 from orion.call.rules import CallRules, RuleError, describe_rule, validate_rule
 from orion.personality import normalize
-from orion.tools.base import INVALID_PARAMETERS, Param, Risk, Tool, ToolError
+from orion.tools.base import INVALID_PARAMETERS, NEEDS_DETAILS, Param, Risk, Tool, ToolError
 
-NEEDS_DETAILS = "needs_details"
 RULE_REFUSED = "call_rule_refused"
 
 

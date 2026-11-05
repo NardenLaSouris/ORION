@@ -5,13 +5,16 @@ Sources, toutes locales (rien n'est cherché ni téléchargé sur Internet) :
   dépendance (format MS-SHLLINK : chemin cible et arguments), ``.url`` de Steam (``steam://rungameid/<n>``) ;
 - registre : applications déclarées (« App Paths ») et programmes installés (clés de désinstallation, icône .exe) ;
 - bibliothèques Steam (``appmanifest_*.acf``), lancées par ``steam.exe -applaunch <n>`` ;
+- jeux Epic Games (manifestes ``*.item`` du lanceur : Fortnite, Rocket League...), lancés par le lanceur Epic avec son
+  adresse de lancement (``com.epicgames.launcher://apps/<espace>:<article>:<jeu>?action=launch``) : Fortnite ne se
+  lance pas par son exécutable ;
 - applications du Microsoft Store et du Xbox Game Pass (Forza Horizon...) : liste du menu Démarrer de Windows
   (``Get-StartApps``, commande fixe en lecture seule), lancées par ``explorer.exe shell:AppsFolder\\<identifiant>``
   comme le Spotify du catalogue ;
 - navigateur par défaut (« lance mon navigateur »).
 
 Chaque application trouvée garde une identité stable (chemin réel de l'exécutable, ``steam:<n>``) : c'est elle que la
-liste des applications interdites compare, jamais le seul nom. Une cible qui n'est pas un programme ordinaire (script,
+liste des applications interdites compare (``epic:<jeu>`` pour Epic), jamais le seul nom. Une cible qui n'est pas un programme ordinaire (script,
 interpréteur de commandes, désinstalleur, fichier absent) est marquée ``problem`` et n'est jamais lancée.
 """
 
@@ -49,13 +52,17 @@ NOISE = {"l", "le", "la", "les", "un", "une", "mon", "ma", "mes", "ton", "ta", "
          "logiciel", "programme", "jeu"}
 BROWSER_WORDS = {"navigateur", "navigateur web", "navigateur internet", "browser", "internet"}
 STEAM_APP = re.compile(r"^\d{1,10}$")
+EPIC_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")  # espace, article et nom de jeu d'un manifeste Epic
+EPIC_LAUNCHER = "EpicGamesLauncher.exe"
+EPIC_DEFAULT = r"%ProgramFiles(x86)%\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"
+EPIC_MANIFESTS = r"%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests"
 # Identifiant d'application du Store : <famille de paquet>!<application> (famille = nom_éditeur13car).
 STORE_APP = re.compile(r"^([A-Za-z0-9.-]{3,100}_[a-z0-9]{13})!([A-Za-z0-9.-]{1,100})$")
 # Programmes installés qui ne sont pas des applications à ouvrir (composants, pilotes, mises à jour).
 COMPONENT = re.compile(r"redistributable|runtime|\bsdk\b|driver|pilote|\bupdate\b|hotfix|language pack|"
                        r"module linguistique", re.IGNORECASE)
 # Source préférée quand plusieurs entrées portent exactement le même nom (deux raccourcis « Discord »).
-SOURCE_RANK = ("raccourci", "raccourci Steam", "Steam", "Microsoft Store", "navigateur par défaut",
+SOURCE_RANK = ("raccourci", "raccourci Steam", "Steam", "Epic Games", "Microsoft Store", "navigateur par défaut",
                "application déclarée", "programme installé")
 
 
@@ -330,6 +337,62 @@ def steam_library(steam: str | None) -> list[Found]:
     return found
 
 
+def epic_launcher() -> str | None:
+    """Lanceur Epic Games : celui qui ouvre ``com.epicgames.launcher://`` (registre), sinon son emplacement habituel."""
+    candidates = []
+    if sys.platform == "win32":
+        import winreg
+
+        try:
+            command = _registry_values(winreg.HKEY_CLASSES_ROOT, r"com.epicgames.launcher\shell\open\command",
+                                       ("",)).get("")
+            candidates += split_windows_args(str(command or ""))[:1]
+        except OSError:
+            pass
+    candidates.append(os.path.expandvars(EPIC_DEFAULT))
+    for path in candidates:
+        path = os.path.normpath(path)
+        if os.path.basename(path).lower() == EPIC_LAUNCHER.lower() and os.path.isfile(path):
+            return path
+    return None
+
+
+def epic_game(manifest: dict, launcher: str | None) -> Found | None:
+    """Jeu ou application d'un manifeste Epic ; None pour un contenu additionnel, un module, le moteur Unreal."""
+    if not launcher or not isinstance(manifest, dict):
+        return None
+    categories = {str(c) for c in manifest.get("AppCategories") or []}
+    if not manifest.get("bIsExecutable") or not manifest.get("LaunchExecutable") or "hidden" in categories             or not categories & {"games", "applications"} or "plugins" in categories:
+        return None
+    ids = [str(manifest.get(k) or "") for k in ("CatalogNamespace", "CatalogItemId", "AppName")]
+    label = re.sub(r"[®™©]", "", str(manifest.get("DisplayName") or "")).strip()
+    if not label or not all(EPIC_ID.match(i) for i in ids):
+        return None
+    uri = f"com.epicgames.launcher://apps/{ids[0]}%3A{ids[1]}%3A{ids[2]}?action=launch&silent=true"
+    found = _found(label, [launcher, uri], "Epic Games")
+    # Le jeu est lancé par le lanceur Epic : son processus n'est pas connu d'avance.
+    return replace(found, identity=f"epic:{ids[2]}", processes=())
+
+
+def epic_library(launcher: str | None = None, folder: str | None = None) -> list[Found]:
+    """Jeux installés par Epic Games, d'après les manifestes du lanceur (lecture seule)."""
+    import json
+
+    launcher = launcher if launcher is not None else epic_launcher()
+    if not launcher:
+        return []
+    found = []
+    for path in sorted(Path(os.path.expandvars(folder or EPIC_MANIFESTS)).glob("*.item")):
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8-sig", errors="replace"))
+        except (OSError, ValueError):
+            continue
+        game = epic_game(manifest, launcher)
+        if game is not None:
+            found.append(game)
+    return found
+
+
 def store_app(label: str, app_id: str) -> Found | None:
     """Application du Store (« Microsoft.ForteBaseGame_8wekyb3d8bbwe!Forzahorizon6 ») ; identifiant vérifié."""
     match = STORE_APP.match(app_id)
@@ -404,7 +467,7 @@ def windows_sources() -> list[Found]:
             item = shortcut(path, steam)
             if item is not None:
                 found.append(item)
-    for source in (registry_apps, lambda: steam_library(steam), store_apps):
+    for source in (registry_apps, lambda: steam_library(steam), epic_library, store_apps):
         try:
             found += source()
         except OSError:

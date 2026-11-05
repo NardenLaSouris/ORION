@@ -3,9 +3,9 @@ par le Core avant l'appel (capacité ``CONTROL_DEVICE`` pour agir, ``READ`` pour
 
 from __future__ import annotations
 
-from orion.discord.engine import DiscordEngine
+from orion.discord.engine import QUESTIONS, DiscordEngine
 from orion.personality import normalize
-from orion.tools.base import EXECUTION_FAILED, Param, Risk, Tool, ToolError
+from orion.tools.base import EXECUTION_FAILED, NEEDS_DETAILS, Param, Risk, Tool, ToolError
 
 
 def _said(value, text: str) -> bool:
@@ -18,7 +18,9 @@ def discord_tools(engine: DiscordEngine) -> list[Tool]:
         def run(**kwargs) -> dict:
             result = engine.act(action, "user", decided=True, **kwargs)
             if not result["ok"]:
-                raise ToolError(EXECUTION_FAILED, result["text"])
+                # « Quel salon ? », « sur A ou sur B ? » : une question, que votre réponse suivante complète.
+                raise ToolError(NEEDS_DETAILS if result.get("code") in QUESTIONS else EXECUTION_FAILED,
+                                result["text"])
             return {"text": result["text"]}
         return run
 

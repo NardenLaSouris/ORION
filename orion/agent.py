@@ -26,6 +26,7 @@ from orion.interfaces import (
     AudioSink, AudioSource, LanguageModel, Message, SpeechToText, TextToSpeech, WakeWordDetector,
 )
 from orion.call.rule_tools import NEEDS_DETAILS
+from orion.discord.intent import discord_answer
 from orion.call.rules import ACK_HINT, is_acknowledgement, sounds_like_acknowledgement
 from orion.presence.declaration import parse_declaration
 from orion.router import IntentRouter, Route
@@ -796,7 +797,20 @@ class Agent:
                 return self._use_tools(history, text, contextual["calls"], latency), False
             return self._run_call(history, text, contextual, latency), False
         clarify, self._clarify = self._clarify, None
-        if (clarify is not None and time.monotonic() - clarify["at"] < CLARIFY_WINDOW and self._tools is not None
+        if (clarify is not None and clarify["tool"] == "discord_join" and self._tools is not None
+                and time.monotonic() - clarify["at"] < CLARIFY_WINDOW and not CANCEL.search(normalize(text))
+                and self._router.route(text).source == "llm"):
+            # « Plusieurs salons… : sur A ou sur B ? » puis « Général sur Et le Zombie » : la demande est complétée
+            # (5 novembre 2026 : la réponse partait au LLM, qui prétendait une action). Une nouvelle demande
+            # reconnue (« lance Fortnite ») n'est jamais prise pour une réponse.
+            parameters = discord_answer(text, clarify.get("parameters") or {})
+            if parameters is not None:
+                latency["route"] = "tool:précision"
+                self._event("routing", latency["route"])
+                return self._run_call(history, f"{clarify['text']} ; précision : {text}",
+                                      {"type": "tool_call", "tool": "discord_join", "parameters": parameters},
+                                      latency), False
+        elif (clarify is not None and time.monotonic() - clarify["at"] < CLARIFY_WINDOW and self._tools is not None
                 and not CANCEL.search(normalize(text))):
             latency["route"] = "tool:précision"
             self._event("routing", latency["route"])
@@ -1027,8 +1041,8 @@ class Agent:
         latency["tool"] = time.perf_counter() - started
         error = outcome.result.error if outcome.result is not None else None
         # Règle d'appel incomplète : la question est posée, la réponse suivante complète la demande.
-        self._clarify = ({"tool": data.get("tool"), "text": text, "at": time.monotonic()}
-                         if error == NEEDS_DETAILS else None)
+        self._clarify = ({"tool": data.get("tool"), "text": text, "at": time.monotonic(),
+                          "parameters": dict(data.get("parameters") or {})} if error == NEEDS_DETAILS else None)
         reply = self._after_tool(history, text, outcome, latency)
         if outcome.status == DONE and outcome.result.success:
             self._record(data, outcome.result.result)
@@ -1160,8 +1174,9 @@ class Agent:
                    previous: dict | None = None) -> str:
         """Plusieurs actions dans l'ordre ; arrêt à la première qui échoue ou demande une confirmation (la suite
         attend alors la réponse)."""
-        spoken, previous = [], dict(previous or {})
+        spoken, previous, question = [], dict(previous or {}), ""
         started = time.perf_counter()
+        self._clarify = None
         for index, call in enumerate(calls):
             data = self._with_hidden({"type": "tool_call", "tool": call["tool"], "parameters": call["parameters"]},
                                      text, call.get("segment", text), previous)
@@ -1173,12 +1188,20 @@ class Agent:
                 if calls[index + 1:]:
                     self._after_confirmation = (text, calls[index + 1:], previous)
                 break
+            if outcome.status == DONE and outcome.result is not None and outcome.result.error == NEEDS_DETAILS                     and not question:
+                # « Quel salon ? » : la question est posée à la fin, la suite de la demande n'attend pas
+                # (5 novembre 2026 : « … connecte-moi en vocal et lance Fortnite » s'arrêtait avant Fortnite).
+                question = outcome.result.message
+                self._clarify = {"tool": data.get("tool"), "text": call.get("segment", text),
+                                 "at": time.monotonic(), "parameters": dict(data.get("parameters") or {})}
+                continue
             if outcome.result is not None and outcome.result.message:
                 spoken.append(outcome.result.message)
             if outcome.status != DONE or not outcome.result.success:
                 break
             self._record(data, outcome.result.result)
         latency["tool"] = time.perf_counter() - started
+        spoken += [question] if question else []
         reply = self._speak(spoken or [self._router.phrase("action_unavailable")], latency)
         self._remember(history, Message("user", text))
         self._remember(history, Message("assistant", reply))

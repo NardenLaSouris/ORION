@@ -152,13 +152,15 @@ def load_applications(table: dict | None) -> dict[str, Application]:
 @dataclass(frozen=True)
 class Blocklist:
     """Applications interdites ([tools.blocked_applications]) : chemins exacts (``paths``), noms de programme
-    (``executables``, « regedit.exe »), jeux Steam (``steam``, numéros) et paquets du Store (``store``). Comparées à
+    (``executables``, « regedit.exe »), jeux Steam (``steam``, numéros), jeux Epic (``epic``, nom de jeu du manifeste,
+    « Fortnite ») et paquets du Store (``store``). Comparées à
     l'identité de la cible résolue, jamais au nom demandé."""
 
     paths: frozenset[str] = frozenset()
     executables: frozenset[str] = frozenset(DEFAULT_BLOCKED)
     steam: frozenset[str] = frozenset()
     store: frozenset[str] = frozenset()
+    epic: frozenset[str] = frozenset()
 
     @classmethod
     def load(cls, table: dict | None) -> "Blocklist":
@@ -166,11 +168,11 @@ class Blocklist:
         items = lambda key: [str(x) for x in table.get(key, []) if str(x).strip()]  # noqa: E731
         return cls(frozenset(identity_of(os.path.expandvars(p)) for p in items("paths")),
                    frozenset({*DEFAULT_BLOCKED, *(e.lower() for e in items("executables"))}),
-                   frozenset(items("steam")), frozenset(items("store")))
+                   frozenset(items("steam")), frozenset(items("store")), frozenset(items("epic")))
 
     def blocks(self, target: Found) -> bool:
         kind, _, ident = target.identity.partition(":")
-        if (kind == "steam" and ident in self.steam) or (kind == "store" and ident in self.store):
+        if (kind == "steam" and ident in self.steam) or (kind == "store" and ident in self.store) or                 (kind == "epic" and ident in self.epic):
             return True
         # Le programme lancé compte aussi : interdire steam.exe interdit les jeux qu'il lance.
         program = target.argv[0] if target.argv else ""

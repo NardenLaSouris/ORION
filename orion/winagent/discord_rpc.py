@@ -44,6 +44,7 @@ HANDSHAKE, FRAME, CLOSE, PING, PONG = 0, 1, 2, 3, 4
 SCOPES = ("rpc", "rpc.voice.read", "rpc.voice.write")
 TOKEN_URL = "https://discord.com/api/oauth2/token"
 VOICE_TYPES = (2, 13)  # salon vocal de serveur, scène
+EAGER_GUILDS = 25  # serveurs dont les salons sont lus d'office ; les autres à la demande
 MAX_FRAME = 1 << 20
 EVENTS_KEPT = 200
 GLOBAL_EVENTS = ("VOICE_CHANNEL_SELECT", "VOICE_SETTINGS_UPDATE", "VOICE_CONNECTION_STATUS")
@@ -268,7 +269,7 @@ class DiscordLink:
         self._events: deque[dict] = deque(maxlen=EVENTS_KEPT)
         self._seq = 0
         self._guilds: dict[str, str] = {}
-        self._directory: tuple[float, list[dict]] | None = None
+        self._directory: tuple[float, list[dict], dict[str, list[dict]]] | None = None
         self._subscribed_channel: str | None = None
         self._backlog: deque[tuple[int, dict]] = deque(maxlen=500)
         self.state: dict[str, Any] = self._empty_state()
@@ -334,20 +335,27 @@ class DiscordLink:
 
         return self.request(run, timeout=20)  # type: ignore[arg-type]
 
-    def directory(self, max_age: float = 600.0) -> list[dict]:
-        """Serveurs et salons vocaux visibles par l'application (mis en cache ``max_age`` secondes)."""
+    def directory(self, max_age: float = 600.0, guild_ids: tuple[str, ...] = ()) -> list[dict]:
+        """Tous vos serveurs (mis en cache ``max_age`` secondes) ; leurs salons vocaux pour les ``EAGER_GUILDS``
+        premiers et pour ceux de ``guild_ids``. Au-delà, un serveur est rendu sans ``channels`` : le Core les
+        demande s'il en a besoin (5 novembre 2026 : « Le Pool Club » et « Et le Zombie avec ou sans ?? » étaient
+        après les 25 premiers serveurs, donc introuvables)."""
         cached = self._directory
-        if cached is not None and self._clock() - cached[0] < max_age:
-            return cached[1]
-        guilds = self.request("GET_GUILDS").get("guilds", [])
+        if cached is None or self._clock() - cached[0] >= max_age:
+            guilds = [{"id": g["id"], "name": g.get("name", "")}
+                      for g in self.request("GET_GUILDS").get("guilds", []) if g.get("id")]
+            for guild in guilds:
+                self._guilds[guild["id"]] = guild["name"]
+            cached = self._directory = (self._clock(), guilds, {})
+        _, guilds, channels = cached
+        wanted = {g["id"] for g in guilds[:EAGER_GUILDS]} | set(guild_ids)
         out = []
-        for guild in guilds[:25]:
-            channels = self.request("GET_CHANNELS", {"guild_id": guild["id"]}).get("channels", [])
-            out.append({"id": guild["id"], "name": guild.get("name", ""),
-                        "channels": [{"id": c["id"], "name": c.get("name", ""), "type": c.get("type")}
-                                     for c in channels if c.get("type") in VOICE_TYPES]})
-            self._guilds[guild["id"]] = guild.get("name", "")
-        self._directory = (self._clock(), out)
+        for guild in guilds:
+            if guild["id"] in wanted and guild["id"] not in channels:
+                found = self.request("GET_CHANNELS", {"guild_id": guild["id"]}).get("channels", [])
+                channels[guild["id"]] = [{"id": c["id"], "name": c.get("name", ""), "type": c.get("type")}
+                                         for c in found if c.get("type") in VOICE_TYPES]
+            out.append({**guild, **({"channels": channels[guild["id"]]} if guild["id"] in channels else {})})
         return out
 
     def link(self) -> dict:

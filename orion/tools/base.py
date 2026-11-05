@@ -23,6 +23,7 @@ TIMEOUT = "timeout"
 APPLICATION_NOT_FOUND = "application_not_found"
 APPLICATION_NOT_RUNNING = "application_not_running"
 INVALID_URL = "invalid_url"
+NEEDS_DETAILS = "needs_details"  # l'outil pose une question : la réponse suivante complète la demande
 
 
 class ToolError(Exception):

@@ -108,7 +108,42 @@ def discord_plan(text: str, exists: Callable[[str], bool], deafened: Callable[[]
         if split:
             rest, server = rest[:split.start()], _name(rest[split.end():])
         channel = _name(rest)
-        if channel in ("", "moi", "toi") and not server:
-            return "discord_join", {}  # « connecte-moi en vocal » : votre salon habituel, sinon ORION demande lequel
+        if channel in ("", "moi", "toi"):
+            # « connecte-moi en vocal » : votre salon habituel, sinon ORION demande lequel ; « … sur le serveur X » :
+            # un salon de ce serveur (jamais un « salon » vide, refusé par l'outil : 5 novembre 2026).
+            return "discord_join", ({"serveur": server} if server else {})
         return "discord_join", {"salon": channel, **({"serveur": server} if server else {})}
     return None
+
+
+ANSWER_SPLIT = re.compile(r"\s(?:sur|dans)\s(?:(?:le|la|l)\s)?(?:(?:serveur|serv|server)\s)?")
+GENERIC_SALONS = {"vocal", "voc", "salon", "discord", "moi", "toi"}
+
+
+def discord_answer(text: str, previous: dict) -> dict | None:
+    """Réponse à une question de « rejoindre un salon » (« Quel salon ? », « Plusieurs salons X : sur A ou sur
+    B ? », « Plusieurs serveurs… ») : paramètres de ``discord_join`` complétés, ou None si ce n'est pas une réponse.
+
+    « Général sur Et le Zombie » : salon et serveur ; « sur GTA France » : le serveur ; un nom seul : le serveur si
+    la question portait sur le serveur (salon déjà connu), sinon le salon."""
+    norm = re.sub(r"^(?:orion|jarvis)\s+", "", normalize(text)).strip()
+    if not norm or len(norm.split()) > 12:
+        return None
+    salon = str(previous.get("salon") or "")
+    salon = "" if _name(normalize(salon)) in GENERIC_SALONS or not _name(normalize(salon)) else salon
+    serveur = str(previous.get("serveur") or "")
+    padded = f" {norm} "
+    split = None
+    for split in ANSWER_SPLIT.finditer(padded):
+        pass
+    if split is not None:
+        left, right = _name(padded[:split.start()]), _name(padded[split.end():])
+        if right:
+            salon = left or salon
+            return {**({"salon": salon} if salon else {}), "serveur": right}
+    name = _name(norm)
+    if not name:
+        return None
+    if salon:
+        return {"salon": salon, "serveur": name}  # salon déjà dit : la question portait sur le serveur
+    return {"salon": name, **({"serveur": serveur} if serveur else {})}

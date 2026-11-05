@@ -767,3 +767,113 @@ def test_connect_me_in_voice_goes_through_the_tool_core_end_to_end():
         request = parse_request(call, registry)
         result = registry.get(request.tool).execute(dict(request.parameters))
         assert result["text"] == "Vous avez rejoint Jeux vidéo sur Amis.", text
+
+# --- 5 novembre 2026 : messages Linphone (« Le Pool Club », « Et le Zombie », « connecte-moi en vocal ») ---------------
+
+POOL, POOL_A, POOL_B = "500000000000000000", "500000000000000001", "500000000000000002"
+
+
+def test_agent_lists_every_server_and_reads_channels_beyond_the_first_25_on_demand(fake, tmp_path):
+    """Seuls les 25 premiers serveurs étaient lus : « Le Pool Club », plus loin, était « introuvable »."""
+    for i in range(30):
+        gid = f"6000000000000000{i:02d}"
+        fake.guilds[gid] = f"Serveur {i}"
+        fake.channels[gid] = [(f"7000000000000000{i:02d}", "Salon", 2)]
+    fake.guilds[POOL] = "Le Pool Club"
+    fake.channels[POOL] = [(POOL_A, "On vomit à 5h", 2), (POOL_B, "Chill", 2)]
+    link = link_for(fake, tmp_path)
+    actions = {t.name: t for t in discord_actions(link)}
+    try:
+        assert wait(lambda: link.snapshot()["auth"] == "lié")
+        guilds = actions["discord_channels"].execute({})["guilds"]
+        pool = next(g for g in guilds if g["id"] == POOL)
+        assert len(guilds) == 33 and "channels" not in pool  # listé, salons pas encore lus
+        asked = sum(c["cmd"] == "GET_CHANNELS" for c in fake.commands)
+        guilds = actions["discord_channels"].execute({"guild_id": POOL})["guilds"]
+        assert [c["name"] for c in next(g for g in guilds if g["id"] == POOL)["channels"]] == ["On vomit à 5h", "Chill"]
+        assert sum(c["cmd"] == "GET_CHANNELS" for c in fake.commands) == asked + 1  # ce serveur seulement
+        everything = actions["discord_channels"].execute({"tous": True})["guilds"]
+        assert all("channels" in g for g in everything)
+    finally:
+        link.stop()
+
+
+class LazyAgent(FakeAgent):
+    """Agent qui ne rend les salons du « Pool Club » que sur demande (serveur au-delà des 25 premiers)."""
+
+    def __init__(self, pool_channels=(("On vomit à 5h", POOL_A), ("Chill", POOL_B))):
+        super().__init__()
+        self.pool = {"id": POOL, "name": "Le Pool Club 🎱",
+                     "channels": [{"id": cid, "name": name} for name, cid in pool_channels]}
+        self.guilds = self.guilds + [self.pool]
+
+    def call(self, action, parameters=None, timeout=None):
+        if action == "discord_channels":
+            self.calls.append((action, parameters or {}))
+            loaded = (parameters or {}).get("guild_id") == POOL or (parameters or {}).get("tous")
+            return {"guilds": [g if g["id"] != POOL or loaded else {"id": POOL, "name": g["name"]}
+                               for g in self.guilds]}
+        return super().call(action, parameters, timeout)
+
+
+def test_a_server_beyond_the_first_25_is_found_by_its_name_and_its_channels_fetched():
+    agent = LazyAgent()
+    engine, _, _ = engine_with(agent)
+    result = engine.act("join", salon="on vomit à 5h", serveur="pool club")
+    assert result["ok"] and agent.calls[-1] == ("discord_join", {"channel_id": POOL_A, "force": False})
+    assert ("discord_channels", {"guild_id": POOL}) in agent.calls
+    engine.act("leave")
+    assert engine.act("join", salon="chill")["ok"]  # sans serveur : salons déjà lus, gardés en cache
+
+
+def test_a_named_server_without_a_channel_joins_its_only_channel_or_asks_which():
+    single, agent, _ = engine_with(LazyAgent(pool_channels=(("On vomit à 5h", POOL_A),)))
+    assert single.act("join", serveur="Le Pool Club")["text"] == "Vous avez rejoint On vomit à 5h sur Le Pool Club."
+    several, _, _ = engine_with(LazyAgent())
+    asked = several.act("join", serveur="pool club")
+    assert asked["ok"] is False and asked["code"] == "channel_missing"
+    assert asked["text"] == "Quel salon sur Le Pool Club : On vomit à 5h ou Chill ?"
+
+
+def test_vocal_is_never_taken_for_a_channel_name():
+    """« Connecte-moi en vocal » proposé par le LLM avec salon=« vocal » : « Vocal Animation » était choisi."""
+    agent = FakeAgent()
+    agent.guilds[0]["channels"].append({"id": "300000000000000009", "name": "Vocal Animation"})
+    engine, _, _ = engine_with(agent)
+    asked = engine.act("join", salon="vocal")
+    assert asked["text"] == "Quel salon vocal voulez-vous rejoindre ?" and asked["code"] == "channel_missing"
+
+
+@pytest.mark.parametrize("answer, previous, expected", [
+    ("Général sur « Et le Zombie avec ou sans ?? »", {"salon": "vocal"},
+     {"salon": "general", "serveur": "et le zombie avec ou sans"}),
+    ("sur GTA France", {"salon": "vocal animation"}, {"salon": "vocal animation", "serveur": "gta france"}),
+    ("GTA France", {"salon": "vocal animation"}, {"salon": "vocal animation", "serveur": "gta france"}),
+    ("On vomit à 5h", {"serveur": "pool club"}, {"salon": "on vomit a 5h", "serveur": "pool club"}),
+    ("Jeux", {}, {"salon": "jeux"}),
+    ("On vomit à 5h dans le serveur Le Pool Club", {}, {"salon": "on vomit a 5h", "serveur": "pool club"}),
+])
+def test_answers_to_a_channel_question_complete_the_request(answer, previous, expected):
+    from orion.discord.intent import discord_answer
+
+    assert discord_answer(answer, previous) == expected
+
+
+def test_server_only_request_is_understood_without_an_empty_channel():
+    exists = lambda name: True  # noqa: E731
+    assert discord_plan("Connecte moi en vocal sur le serveur « Le Pool Club »", exists) == \
+        ("discord_join", {"serveur": "pool club"})
+
+
+def test_a_channel_question_becomes_a_follow_up_for_the_tool_core():
+    from orion.discord.tools import discord_tools
+    from orion.tools.base import NEEDS_DETAILS
+
+    engine, _, _ = engine_with(LazyAgent())
+    join = next(t for t in discord_tools(engine) if t.name == "discord_join")
+    with pytest.raises(ToolError) as err:
+        join.execute({"serveur": "pool club"})
+    assert err.value.code == NEEDS_DETAILS
+    with pytest.raises(ToolError) as err:
+        join.execute({"salon": "cuisine"})
+    assert err.value.code == "execution_failed"  # introuvable : pas une question

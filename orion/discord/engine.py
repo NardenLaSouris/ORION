@@ -41,6 +41,11 @@ TRUSTED = ("user", "admin")
 ACTIONS = ("mute", "unmute", "deafen", "undeafen", "join", "leave", "link", "unlink")
 OPENING = ("unmute", "undeafen")  # rouvrent le micro ou le son : jamais d'une initiative
 OFFLINE, ONLINE = "hors ligne", "en ligne"
+# Erreurs qui sont une question (« Quel salon ? », « sur A ou sur B ? ») : votre réponse suivante complète la demande.
+QUESTIONS = ("channel_missing", "channel_ambiguous", "guild_ambiguous")
+# « Connecte-moi en vocal » : « vocal » n'est pas le nom d'un salon (5 novembre 2026 : « Vocal Animation » choisi).
+GENERIC_SALONS = {"vocal", "le vocal", "en vocal", "voc", "salon", "salon vocal", "le salon", "discord", "vocal discord",
+                  "un vocal", "un salon", "un salon vocal", "moi", "toi"}
 
 
 # Erreurs de l'agent et du module : même type (code stable, message en français).
@@ -169,6 +174,7 @@ class DiscordEngine(BaseModule):
         le Core) ; sinon (ORION Control) elle est demandée ici. Rend {ok, text, state} ; jamais d'exception."""
         if action not in ACTIONS:
             return self._out(False, "Action Discord inconnue.")
+        salon = "" if label(salon) in GENERIC_SALONS else salon
         if action in OPENING and principal not in TRUSTED:
             self._record(principal, f"discord.{action}", False, "démute ou fin de sourdine : demande explicite requise")
             return self._out(False, "Je ne rouvre jamais votre micro ni votre son sans votre demande.")
@@ -180,7 +186,7 @@ class DiscordEngine(BaseModule):
             text = self._run(action, salon.strip(), serveur.strip(), channel_id)
         except DiscordUnavailable as exc:
             self._record(principal, f"discord.{action}", False, f"{exc.code} : {exc.message}"[:160])
-            return self._out(False, self._explain(exc))
+            return self._out(False, self._explain(exc), exc.code)
         self._record(principal, f"discord.{action}", True, "exécutée")
         return self._out(True, text)
 
@@ -215,10 +221,12 @@ class DiscordEngine(BaseModule):
 
     def _join(self, salon: str, serveur: str, channel_id: str = "") -> str:
         if channel_id:
-            known = [(g, c) for g in self.directory() for c in g.get("channels", []) if c["id"] == channel_id]
+            known = [(g, c) for g in self.directory() for c in g.get("channels") or [] if c["id"] == channel_id]
             if not known:
                 raise DiscordUnavailable("channel_not_found", "Salon inconnu : actualisez la liste.")
             guild, channel = known[0]
+        elif not salon and serveur:  # « connecte-moi en vocal sur Le Pool Club » : un salon de ce serveur
+            guild, channel = self._on_server(serveur)
         elif not salon:
             current = (self._remote or {}).get("voice") or {}
             if current:  # « connecte-moi en vocal » alors que vous y êtes : rien ne change
@@ -267,16 +275,10 @@ class DiscordEngine(BaseModule):
         wanted, place = label(salon), label(serveur)
         guilds = self.directory()
         if place:
-            guilds = [g for g in guilds if _matches(label(g["name"]), place)] or []
-            if not guilds:
-                raise DiscordUnavailable("guild_not_found", f"Je ne trouve pas le serveur « {serveur} ».")
-        found: list[tuple[int, dict, dict]] = []
-        for guild in guilds:
-            for channel in guild.get("channels", []):
-                name = label(channel["name"])
-                score = 3 if name == wanted else 2 if _matches(name, wanted) else 0
-                if score:
-                    found.append((score, guild, channel))
+            guilds = self._with_channels(self._guilds_named(guilds, serveur))
+        found = _search(guilds, wanted)
+        if not found and not place and any("channels" not in g for g in guilds):
+            found = _search(self._with_channels(guilds), wanted)  # salon d'un serveur au-delà des 25 premiers
         if not found:
             raise DiscordUnavailable("channel_not_found", f"Je ne trouve pas de salon vocal « {salon} ».")
         best = max(score for score, _, _ in found)
@@ -289,6 +291,60 @@ class DiscordEngine(BaseModule):
             raise DiscordUnavailable("channel_ambiguous", f"Plusieurs salons « {spoken(found[0][1]['name'])} » : sur "
                                      + " ou sur ".join(places[:3]) + " ?")
         return found[0]
+
+    def _guilds_named(self, guilds: list[dict], serveur: str) -> list[dict]:
+        """Serveurs portant ce nom (le nom exact d'abord) ; aucun : ``guild_not_found``."""
+        place = label(serveur)
+        matched = [g for g in guilds if _matches(label(g["name"]), place)]
+        exact = [g for g in matched if label(g["name"]) == place]
+        if not matched:
+            raise DiscordUnavailable("guild_not_found", f"Je ne trouve pas le serveur « {serveur} ».")
+        return exact or matched
+
+    def _with_channels(self, guilds: list[dict]) -> list[dict]:
+        """Salons vocaux des serveurs que l'agent n'a pas encore lus (au-delà des 25 premiers) : demandés à l'agent
+        (un serveur à la fois s'ils sont peu nombreux, sinon tous) puis gardés dans la liste en cache."""
+        missing = [g for g in guilds if "channels" not in g]
+        if not missing:
+            return guilds
+        if len(missing) <= 3:
+            fresh = [g for m in missing for g in self._agent.call("discord_channels", {"guild_id": m["id"]},
+                                                                  timeout=20).get("guilds", [])]
+        else:
+            fresh = self._agent.call("discord_channels", {"tous": True}, timeout=90).get("guilds", [])
+        loaded = {g["id"]: g["channels"] for g in fresh if "channels" in g}
+        for guild in guilds:
+            if "channels" not in guild and guild["id"] in loaded:
+                guild["channels"] = loaded[guild["id"]]
+        return guilds
+
+    def _on_server(self, serveur: str) -> tuple[dict, dict]:
+        """Serveur nommé sans salon : son seul salon vocal, sinon ORION demande lequel (jamais au hasard)."""
+        try:
+            guilds = self._with_channels(self._guilds_named(self.directory(), serveur))
+        except DiscordUnavailable as exc:
+            if exc.code != "guild_not_found":
+                raise
+            seen = [(g, c) for g, c in self._seen.values() if _matches(label(g["name"]), label(serveur))]
+            if len({c["id"] for _, c in seen}) == 1:
+                return seen[0]
+            raise
+        if len(guilds) > 1:
+            names = sorted({spoken(g["name"]) for g in guilds})
+            raise DiscordUnavailable("guild_ambiguous", "Plusieurs serveurs : " + " ou ".join(names[:3]) + " ?")
+        guild = guilds[0]
+        channels = guild.get("channels") or []
+        current = ((self._remote or {}).get("voice") or {})
+        here = [c for c in channels if c["id"] == current.get("channel_id")]
+        if here:
+            return guild, here[0]
+        if len(channels) == 1:
+            return guild, channels[0]
+        if not channels:
+            raise DiscordUnavailable("channel_not_found", f"Je ne vois aucun salon vocal sur {spoken(guild['name'])}.")
+        names = [spoken(c["name"]) for c in channels[:4]]
+        listed = ", ".join(names[:-1]) + " ou " + names[-1]
+        raise DiscordUnavailable("channel_missing", f"Quel salon sur {spoken(guild['name'])} : {listed} ?")
 
     def _apply(self, remote: dict) -> dict:
         if isinstance(remote, dict) and "discord" in remote:
@@ -368,8 +424,8 @@ class DiscordEngine(BaseModule):
             return "ORION n'est pas encore autorisé dans Discord : reliez-le depuis ORION Control."
         return exc.message
 
-    def _out(self, ok: bool, text: str) -> dict:
-        return {"ok": ok, "text": text, "state": self.state()}
+    def _out(self, ok: bool, text: str, code: str = "") -> dict:
+        return {"ok": ok, "text": text, "state": self.state(), **({"code": code} if code else {})}
 
     # --- Phrases ----------------------------------------------------------------------------------------------
 
@@ -418,7 +474,7 @@ class DiscordEngine(BaseModule):
             return 200, self.poll()
         if method == "GET" and parts == ["channels"]:
             try:
-                return 200, {"guilds": self.directory(refresh=True)}
+                return 200, {"guilds": self._with_channels(self.directory(refresh=True))}
             except DiscordUnavailable as exc:
                 return 503, {"status": "error", "error": exc.code, "message": self._explain(exc)}
         if method == "POST" and len(parts) == 1 and parts[0] in ACTIONS:
@@ -444,6 +500,17 @@ def spoken(name: str) -> str:
     text = unicodedata.normalize("NFKC", name or "")
     kept = "".join(c if unicodedata.category(c)[0] in "LNZ" or c in "'’-&+.,!?" else " " for c in text)
     return " ".join(kept.split()) or (name or "").strip()
+
+
+def _search(guilds: list[dict], wanted: str) -> list[tuple[int, dict, dict]]:
+    found = []
+    for guild in guilds:
+        for channel in guild.get("channels") or []:
+            name = label(channel["name"])
+            score = 3 if name == wanted else 2 if _matches(name, wanted) else 0
+            if score:
+                found.append((score, guild, channel))
+    return found
 
 
 def _matches(name: str, wanted: str) -> bool:

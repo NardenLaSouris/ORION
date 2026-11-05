@@ -229,3 +229,21 @@ def test_accounts_script_never_grants_access_to_the_key_or_the_personal_base():
         assert path in script  # chacun vérifié illisible à la fin
     assert "usermod -aG orion-v3" not in script and "-aG orion-import,orion-evolve orion-v3" in script
     assert "ReadWritePaths=%s/staging" in script and "systemctl restart orion\n" not in script
+
+
+def test_the_nightly_backup_probe(tmp_path):
+    """État de la sauvegarde de la nuit : absent (non installée, aucune alerte), réussi et récent, en échec, trop
+    vieux ou illisible (SENTINEL prévient)."""
+    import json
+
+    status, now = tmp_path / "backup_status.json", 1_800_000_000.0
+    probe = rs.backup_probe(status, 26.0, clock=lambda: now)
+    assert probe() == (False, "non configuré")
+    status.write_text(json.dumps({"at": now - 3600, "ok": True}), encoding="utf-8")
+    assert probe()[0] is True and probe()[1].startswith("vérifiée le ")
+    status.write_text(json.dumps({"at": now - 27 * 3600, "ok": True}), encoding="utf-8")
+    assert probe() == (False, probe()[1]) and "il y a 27 h" in probe()[1]
+    status.write_text(json.dumps({"at": now, "ok": False, "problems": ["disque plein"]}), encoding="utf-8")
+    assert probe()[0] is False and "disque plein" in probe()[1]
+    status.write_text("{abîmé", encoding="utf-8")
+    assert probe() == (False, "état de la sauvegarde illisible")

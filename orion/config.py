@@ -420,6 +420,10 @@ class PlatformConfig:
     data_key: str = "orion.data_key"
     # Lot F5 : NAS facultatif, monté sur le mini-PC (SMB, NFS…) ; vide : aucun. Rien d'opérationnel n'y est rangé.
     nas_path: str = ""
+    # Sauvegarde de la nuit (scripts/v3_backup.py periodic, minuterie orion-v3-backup.timer) : SENTINEL prévient par
+    # écrit si l'état manque d'être renouvelé au-delà de backup_max_hours. Fichier absent : sauvegarde non installée.
+    backup_status: Path = Path("data/backup_status.json")
+    backup_max_hours: float = 26.0
 
 
 @dataclass(frozen=True)

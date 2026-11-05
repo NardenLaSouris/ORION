@@ -100,3 +100,62 @@ def test_secrets_in_the_data_folder_are_never_backed_up(tmp_path):
     manifest = (saved / "manifest.json").read_text(encoding="utf-8")
     assert '"excluded"' in manifest and "spotify_token.json" in manifest and "jeton-prive-42" not in manifest
     db.close()
+
+def test_the_nightly_backup_is_verified_kept_apart_promoted_weekly_and_reported(tmp_path):
+    """Sauvegarde de la nuit : quotidienne vérifiée, à part des sauvegardes d'avant déploiement (aucune rotation ne
+    touche l'autre) ; hebdomadaire seulement si la dernière a 7 jours ; état écrit pour SENTINEL, sans s'inclure."""
+    import json
+    import time
+
+    data, db = make_data(tmp_path)
+    out, status = tmp_path / "out", data / v3_backup.STATUS_NAME
+    before_deploy = v3_backup.backup(data, out, keep=14)
+    first = v3_backup.periodic(data, out, status)
+    assert first["ok"] and first["problems"] == [] and first["files"] == 2
+    assert first["folder"].startswith("quotidiennes/") and first["weekly"].startswith("hebdomadaires/")
+    assert json.loads(status.read_text(encoding="utf-8"))["ok"] is True
+    time.sleep(1.1)
+    second = v3_backup.periodic(data, out, status)
+    assert second["weekly"] == first["weekly"]  # moins de 7 jours : pas de nouvelle hebdomadaire
+    assert not (out / second["folder"] / v3_backup.STATUS_NAME).exists()
+    time.sleep(1.1)
+    later = v3_backup.periodic(data, out, status, keep=2, weekly_keep=1, clock=lambda: time.time() + 8 * 86400)
+    assert later["weekly"] != first["weekly"] and len(list((out / "hebdomadaires").iterdir())) == 1
+    assert len(list((out / "quotidiennes").iterdir())) == 2
+    assert before_deploy.exists() and v3_backup.verify(out / later["weekly"]) == []
+    db.close()
+
+
+def test_a_failed_nightly_backup_is_reported_never_raised(tmp_path):
+    status = tmp_path / v3_backup.STATUS_NAME
+    result = v3_backup.periodic(tmp_path / "absent", tmp_path / "out", status)
+    assert result["ok"] is False and "absent" in result["problems"][0]
+    assert '"ok": false' in status.read_text(encoding="utf-8")
+    assert v3_backup.main(["periodic", "--data", str(tmp_path / "absent"), "--out", str(tmp_path / "out"),
+                           "--status", str(status)]) == 1
+    refused = v3_backup.periodic(tmp_path, Path("/opt/orion/sauvegardes"), None)
+    assert refused["ok"] is False and "production" in refused["problems"][0]
+
+
+def test_the_nightly_timer_runs_as_user_without_sudo_and_keeps_backups():
+    service = (ROOT / "deploy" / "orion-v3-backup.service").read_text(encoding="utf-8")
+    timer = (ROOT / "deploy" / "orion-v3-backup.timer").read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "v3_backup_timer.sh").read_text(encoding="utf-8")
+    assert "/opt/orion-v3/scripts/v3_backup.py periodic" in service and "User=" not in service
+    assert "OnCalendar=*-*-* 03:15:00" in timer and "Persistent=true" in timer
+    assert "systemctl --user" in script and "sudo systemctl" not in script
+    code = [line for line in script.splitlines() if not line.lstrip().startswith("#")]
+    assert not any("rm " in line and "sauvegardes" in line for line in code)  # aucune sauvegarde effacée ici
+    bash = shutil.which("bash")
+    if bash:
+        assert subprocess.run([bash, "-n", str(ROOT / "deploy" / "v3_backup_timer.sh")]).returncode == 0
+
+
+def test_the_pc_copy_is_read_only_on_the_core_and_verified():
+    script = (ROOT / "deploy" / "pc_core_backup_pull.ps1").read_bytes()
+    assert script.startswith(b"\xef\xbb\xbf")  # PowerShell 5.1 : accents lus correctement
+    text = script.decode("utf-8")
+    assert "BatchMode=yes" in text and "Get-FileHash -Algorithm SHA256" in text and ".partiel" in text
+    for line in text.splitlines():
+        if "ssh.exe" in line:
+            assert '"ls -1 $Remote' in line  # seule commande lancée sur le Core : une lecture

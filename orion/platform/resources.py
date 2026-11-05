@@ -29,8 +29,10 @@ log = logging.getLogger(__name__)
 
 LLM, STT, AGENT_PC, AGENT_LAPTOP, WEB, NAS = ("llm.primary", "stt.gpu", "agent.pc", "agent.portable", "web.search",
                                               "storage.nas")
+BACKUP = "backup.core"
 LABELS = {LLM: "LLM principal (Katana)", STT: "Transcription sur GPU (Katana)", AGENT_PC: "Agent du PC fixe",
-          AGENT_LAPTOP: "Agent du PC portable", WEB: "Recherche Web (SearXNG)", NAS: "NAS (facultatif)"}
+          AGENT_LAPTOP: "Agent du PC portable", WEB: "Recherche Web (SearXNG)", NAS: "NAS (facultatif)",
+          BACKUP: "Sauvegarde de la nuit (Core)"}
 PROBE_TIMEOUT = 3.0
 LOAD_LIMIT = 0.85  # charge moyenne sur 1 min, rapportée au nombre de cœurs
 MEMORY_FLOOR = 0.15  # part de mémoire disponible sous laquelle le mini-PC est « chargé »
@@ -185,6 +187,32 @@ def directory_probe(path: str | Path) -> Callable[[], tuple[bool, str]]:
         except OSError as exc:
             return False, f"lecture seule ou refusé ({exc.strerror or exc})"
         return True, str(folder)
+    return probe
+
+
+def backup_probe(path: str | Path, max_hours: float = 26.0,
+                 clock: Callable[[], float] = time.time) -> Callable[[], tuple[bool, str]]:
+    """État écrit par ``scripts/v3_backup.py periodic`` : absent, non configuré (minuterie pas installée, aucune
+    alerte) ; en échec, illisible ou plus vieux que ``max_hours`` : indisponible (SENTINEL prévient par écrit)."""
+    import json
+
+    def probe() -> tuple[bool, str]:
+        target = Path(path)
+        if not target.is_file():
+            return False, "non configuré"
+        try:
+            state = json.loads(target.read_text(encoding="utf-8"))
+            at = float(state["at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return False, "état de la sauvegarde illisible"
+        hours = (clock() - at) / 3600
+        when = time.strftime("%d/%m %H:%M", time.localtime(at))
+        if not state.get("ok"):
+            problems = "; ".join(str(p) for p in state.get("problems") or []) or "raison inconnue"
+            return False, f"échec le {when} : {problems}"[:160]
+        if hours > max_hours:
+            return False, f"dernière sauvegarde le {when}, il y a {hours:.0f} h"
+        return True, f"vérifiée le {when}"
     return probe
 
 

@@ -933,13 +933,16 @@ def configure_resources(cfg: Config, resources, llm, devices, agent=None) -> Non
     if cfg.web.enabled:
         resources.register(rs.WEB, rs.tcp_probe(cfg.web.base_url), ttl=120)
     resources.register(rs.NAS, rs.directory_probe(cfg.platform.nas_path), ttl=300)
+    resources.register(rs.BACKUP, rs.backup_probe(cfg.platform.backup_status, cfg.platform.backup_max_hours),
+                       ttl=600)
     resources.declare("Core", {
         rs.LLM: "LLM de secours du mini-PC, puis règles : commandes simples et réponses courtes",
         rs.STT: "Whisper local (small) sur le mini-PC, plus lent",
         rs.AGENT_PC: "actions sur le PC refusées avec une explication ; tout le reste continue",
         rs.AGENT_LAPTOP: "actions sur le portable refusées avec une explication",
         rs.WEB: "questions d'actualité : ORION dit qu'elle ne peut pas chercher",
-        rs.NAS: "aucun effet : rien d'opérationnel n'est rangé sur le NAS"})
+        rs.NAS: "aucun effet : rien d'opérationnel n'est rangé sur le NAS",
+        rs.BACKUP: "aucun effet sur le fonctionnement ; SENTINEL vous prévient par écrit"})
     if cfg.news.enabled:
         resources.declare("NEWS", {rs.LLM: "regroupement par mots et synthèses simples (titre, statut, sources)"})
     if cfg.watch.enabled:

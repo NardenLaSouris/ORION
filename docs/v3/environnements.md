@@ -126,6 +126,61 @@ sudo systemctl start orion-v3
 - Répétition faite le 4 novembre 2026 : la dernière sauvegarde réelle a été restaurée dans un dossier jetable. Les
   4 bases sont intègres et ont toutes leurs tables (`orion_ops`, `orion_personal`, `orion_v3`, `journal`).
 
+### Sauvegarde de la nuit
+
+Préparée le 5 novembre 2026, à la suite de la phase 0 de la feuille de route (« ce chantier ne doit pas être oublié »).
+
+**Quand.** Chaque nuit à 03:15, à 5 minutes près. Une nuit manquée est rattrapée au démarrage du Core.
+- La minuterie `orion-v3-backup.timer` appartient au compte `user` (systemd `--user`, linger actif). Aucun sudo
+  n'est nécessaire.
+- Elle lance `scripts/v3_backup.py periodic` depuis la copie déployée, qu'EVOLVE ne peut pas modifier.
+
+**Où.**
+- **Quotidiennes** : `~/sauvegardes/orion-v3/quotidiennes/<date UTC>/`. Chacune est vérifiée (SHA-256 et
+  `integrity_check`). Les 14 dernières sont gardées.
+- **Hebdomadaires** : `hebdomadaires/`. La quotidienne y est recopiée quand la dernière hebdomadaire a 7 jours ou
+  plus. Les 8 dernières sont gardées.
+- Les sauvegardes d'avant déploiement restent à la racine. Aucune rotation ne touche les autres.
+
+**Ce qui est sauvegardé.** Comme avant chaque déploiement : les bases et les fichiers JSON du dossier de données. Le
+5 novembre, cela faisait 18 fichiers, 3,5 Mo, en 0,2 s.
+
+**Ce qui ne l'est pas.**
+- Le jeton Spotify, qui est un secret.
+- La clé F4, qui n'est jamais copiée. Sans elle, la base personnelle sauvegardée reste illisible : gardez-en une copie
+  hors du Core.
+- `config.local.toml`.
+- Les enregistrements du mot d'éveil (`data/wakeword/captures`).
+- Le clone d'EVOLVE (`data/evolve`), qui se recrée depuis Git.
+
+**Surveillance par SENTINEL.** La sauvegarde écrit son état dans `data/backup_status.json`. SENTINEL le lit sous le nom
+« Sauvegarde de la nuit (Core) ».
+- En cas d'échec, d'état illisible ou de sauvegarde vieille de plus de 26 heures, la ressource passe en
+  indisponible. Une alerte écrite part après 2 minutes, comme pour les autres ressources.
+- Si le fichier est absent (minuterie pas encore installée, ou retirée), la ressource est « non configurée » et
+  aucune alerte n'est envoyée.
+
+**Copie sur le PC.** Chaque dimanche à 12:30, `deploy/pc_core_backup_pull.ps1` récupère la dernière hebdomadaire. Un
+dimanche manqué est rattrapé au démarrage du PC.
+- Côté Core, la copie ne fait que lire, avec la clé SSH et jamais de mot de passe.
+- Chaque fichier est revérifié sur le PC. Une copie incomplète ou abîmée est écartée.
+- Elle est rangée dans `%USERPROFILE%\.orion\sauvegardes\core-v3\`, où les 4 dernières sont gardées.
+- La tâche s'exécute sans fenêtre, en priorité basse, sans effet sur les jeux.
+
+**Installation**, à faire par vous après le déploiement de ce changement. Sur le Core :
+```bash
+ssh user@192.168.1.91 "bash /opt/orion-v3/deploy/v3_backup_timer.sh --maintenant"
+```
+Sur le PC :
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Users\theju\orion-v3\deploy\pc_core_backup_pull.ps1 -Installer
+```
+
+**Retrait** : les mêmes commandes, avec `--retirer` sur le Core et `-Retirer` sur le PC. Les sauvegardes sont gardées.
+
+**Restauration** : la même procédure que ci-dessus, avec le dossier `~/sauvegardes/orion-v3/quotidiennes/<date>` ou
+`hebdomadaires/<date>`.
+
 ### Tester depuis vos appareils
 
 - Conversation écrite : `http://192.168.1.91:8867/discuter` (PC fixe et Katana).

@@ -1,0 +1,12 @@
+# Sauvegarde de la nuit des données V3 (docs/v3/environnements.md, « Sauvegarde de la nuit »).
+# Unité du compte user (systemd --user, linger actif), installée par deploy/v3_backup_timer.sh ; jamais de sudo.
+[Unit]
+Description=ORION V3 : sauvegarde de la nuit des données (vérifiée, état pour SENTINEL)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/orion-v3/.venv/bin/python /opt/orion-v3/scripts/v3_backup.py periodic
+Nice=10
+IOSchedulingClass=idle
+UMask=0077
+TimeoutStartSec=30min

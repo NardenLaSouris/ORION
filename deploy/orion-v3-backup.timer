@@ -1,0 +1,11 @@
+# Chaque nuit à 03:15 (plus ou moins 5 minutes) ; une nuit manquée (Core éteint) est rattrapée au démarrage.
+[Unit]
+Description=ORION V3 : sauvegarde de la nuit
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

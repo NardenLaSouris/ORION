@@ -371,8 +371,43 @@ def test_the_installed_list_is_read_once_then_cached():
     finder.find("a")
     finder.find("b")
     clock[0] = 121
-    finder.find("c")
+    finder.find("c")  # liste connue rendue tout de suite, nouvelle lecture en arrière-plan
+    finder._refreshing.join(timeout=5)  # noqa: SLF001
     assert len(calls) == 2
+
+
+def test_a_stale_list_answers_at_once_and_is_read_again_in_the_background():
+    """5 novembre 2026 : « Lance Fortnite » a attendu 14 s la lecture du PC ; le Core avait abandonné."""
+    import threading
+
+    gate, calls, clock = threading.Event(), [], [0.0]
+    lists = [[_found("Fortnite", [r"C:\Epic\Fortnite.exe"], "Epic Games")],
+             [_found("Fortnite", [r"C:\Epic\Fortnite.exe"], "Epic Games"),
+              _found("Nouveau Jeu", [r"C:\Jeux\nouveau.exe"], "raccourci")]]
+
+    def sources():
+        calls.append(1)
+        if len(calls) > 1:
+            gate.wait(5)  # lecture lente du PC
+        return lists[len(calls) - 1]
+
+    finder = AppFinder(sources, lambda: None, ttl=120, clock=lambda: clock[0])
+    assert [f.label for f in finder.find("fortnite")] == ["Fortnite"]
+    clock[0] = 500
+    assert [f.label for f in finder.find("fortnite")] == ["Fortnite"]  # sans attendre la lecture en cours
+    assert finder.find("nouveau jeu") == []
+    gate.set()
+    finder._refreshing.join(timeout=5)  # noqa: SLF001
+    assert [f.label for f in finder.find("nouveau jeu")] == ["Nouveau Jeu"]
+
+
+def test_warm_reads_the_list_once_in_the_background_before_the_first_request():
+    calls = []
+    finder = AppFinder(lambda: calls.append(1) or [], lambda: None)
+    finder.warm()
+    finder.warm()
+    finder.find("x")
+    assert len(calls) == 1
 
 
 def test_epic_games_are_launched_by_the_epic_launcher(tmp_path):

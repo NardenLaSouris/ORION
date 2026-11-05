@@ -26,6 +26,7 @@ import os
 import re
 import struct
 import sys
+import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -510,12 +511,43 @@ class AppFinder:
                  clock: Callable[[], float] = time.monotonic):
         self._sources, self._browser, self._ttl, self._clock = sources, browser, ttl, clock
         self._cache: tuple[float, list[Found]] | None = None
+        self._lock = threading.Lock()
+        self._refreshing: threading.Thread | None = None
 
     def apps(self) -> list[Found]:
-        now = self._clock()
-        if self._cache is None or now - self._cache[0] > self._ttl:
-            self._cache = (now, list(self._sources()))
-        return self._cache[1]
+        """Liste des applications installées. Lire le PC prend une quinzaine de secondes (raccourcis, Store) : passé
+        ``ttl``, la liste connue sert tout de suite et une nouvelle lecture se fait en arrière-plan (5 novembre 2026 :
+        « Lance Fortnite » lancé, mais réponse en 14 s, après l'abandon du Core : « Votre PC ne répond pas »)."""
+        cache = self._cache
+        if cache is None:
+            running = self._refreshing
+            if running is not None:
+                running.join()  # lecture de démarrage (``warm``) en cours : l'attendre plutôt que la refaire
+            if self._cache is None:
+                self._refresh()
+            return self._cache[1] if self._cache else []
+        if self._clock() - cache[0] > self._ttl:
+            self.warm()
+        return cache[1]
+
+    def warm(self) -> None:
+        """Lit la liste en arrière-plan (une lecture à la fois ; rien si elle est encore récente)."""
+        with self._lock:
+            cache = self._cache
+            if (self._refreshing is not None and self._refreshing.is_alive()) or                     (cache is not None and self._clock() - cache[0] <= self._ttl):
+                return
+            self._refreshing = threading.Thread(target=self._refresh, name="applications", daemon=True)
+            self._refreshing.start()
+
+    def _refresh(self) -> None:
+        try:
+            found = list(self._sources())
+        except Exception:  # noqa: BLE001 - la liste précédente reste valable
+            log.exception("Liste des applications installées illisible")
+            if self._cache is None:
+                self._cache = (self._clock(), [])
+            return
+        self._cache = (self._clock(), found)
 
     def find(self, name: str) -> list[Found]:
         """Applications les plus proches du nom (une par identité) ; plusieurs = à préciser, aucune = inconnue."""

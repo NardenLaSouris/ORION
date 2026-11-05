@@ -953,3 +953,29 @@ def test_nickname_tools_record_and_never_hide_a_failure(tmp_path):
     assert "boulot" in tools["discord_aliases"].execute({})["text"]
     with pytest.raises(ToolError):
         tools["discord_forget_alias"].execute({"surnom": "inconnu"})
+
+
+def test_nickname_requests_are_routed_to_discord_without_the_word_discord():
+    from orion.capabilities import CapabilityRegistry
+    from orion.personality import load_personality
+    from orion.router import IntentRouter
+
+    router = IntentRouter(load_personality(Path(__file__).resolve().parents[1] / "personality.toml"),
+                          CapabilityRegistry(), tools=("discord_status", "discord_join", "discord_alias"))
+    for text in ("Surnomme le serveur « Et le Zombie avec ou sans ?? » en « le zombie »",
+                 "Quels sont mes surnoms de serveurs ?"):
+        assert router.route(text).name == "tool.discord", text
+    assert router.route("Oublie le surnom le zombie").source == "tool"  # « oublie » : aussi un mot de la mémoire
+
+
+def test_forgetting_a_server_nickname_is_not_a_memory_forget():
+    from test_tools import make_core
+    from orion.discord.tools import discord_tools
+    from orion.tools.quick import quick_plan
+
+    core = make_core()
+    engine, _, _ = engine_with()
+    for tool in discord_tools(engine):
+        core.registry.register(tool)
+    assert quick_plan("Oublie le surnom le zombie", core.registry)["tool"] == "discord_forget_alias"
+    assert (quick_plan("Oublie que j'aime le café", core.registry) or {}).get("tool") != "discord_forget_alias"

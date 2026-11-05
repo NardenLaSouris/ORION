@@ -299,6 +299,10 @@ class QuickPlanner:
         combined = self._spotify_with_volume(norm, text) if norm and self._exists("spotify_play") else None
         if combined is not None:
             return combined
+        if "surnom" in norm:  # « oublie le surnom Le Zombie » : un surnom de serveur Discord, pas un souvenir
+            alias = self._discord(norm, text, None)
+            if alias is not None and alias[0] in ("discord_alias", "discord_forget_alias", "discord_aliases"):
+                return {"type": "tool_call", "tool": alias[0], "parameters": alias[1]}
         memory = self._memory(norm, text) if norm else None
         if memory is None and (not norm or DISQUALIFIERS.search(norm)):
             return None

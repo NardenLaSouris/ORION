@@ -224,6 +224,11 @@ STALE_UNAVAILABLE = {
 ORION_OBJECTS = re.compile(r"\b(mon|ma|mes|le|la|les|ce|cette|ces|du|des)\s+(mails?|courriers?|minuteurs?|rappels?|"
                            r"reveils?|alarmes?)\b")
 CLARIFY_WINDOW = 180.0  # s pour répondre à une question de précision
+# Demande d'outil précédente donnée au planificateur comme contexte (« plus fort », « annule-le ») : seulement si
+# elle est récente. 5 novembre 2026 : « Surnomme le serveur… », 6 minutes après « mets la lumière en blanc chaud »,
+# devenu « ambiance lecture » sur toutes les lumières.
+FOLLOW_WINDOW = 120.0
+FOLLOW_WORDS = 6  # au-delà, une demande complète : l'action doit y être nommée, jamais déduite de la précédente
 DIAGNOSTIC = re.compile(r"\b(?:diagnostic|diagnostique|diagnostiquer|check ?up|etat du systeme|etat de l environnement|"
                         r"etat de tes systemes|est ce que tout fonctionne|tout fonctionne bien)\b")
 # « Je sors, appelle-moi dans 3 minutes », « je pars et éteins tout » : départ annoncé, puis une autre demande.
@@ -347,6 +352,7 @@ class Agent:
         self._last_outcome = None
         self._action_unclear = False
         self._last_tool_request = ""
+        self._last_tool_at = 0.0
         self._last_done: tuple[str, str, float] | None = None
         self._previous_request = ""
         # Seconde vérification du wake word (jarvis.wakeword.verify) et audio des réveils (jarvis.wakeword.captures).
@@ -876,7 +882,8 @@ class Agent:
             return self._run_call(history, text, {"type": "tool_call", "tool": "declare_departure",
                                                   "parameters": {}}, latency), False
         follow_up = self._tool_follow_up(text)
-        self._previous_request, self._last_tool_request = self._last_tool_request, ""
+        recent = time.monotonic() - self._last_tool_at <= FOLLOW_WINDOW
+        self._previous_request, self._last_tool_request = (self._last_tool_request if recent else ""), ""
         route = Route("tool", "tool.follow_up") if follow_up else self._router.route(text)
         if route.source == "unavailable" and self._tools is not None and any(
                 self._tools.registry.exists(t) for t in STALE_UNAVAILABLE.get(route.name, ())):
@@ -956,6 +963,12 @@ class Agent:
             return self._say_text(history, text, self._router.phrase("action_unclear"), latency)
         if data is None:
             return None
+        if previous and len(normalize(text).split()) > FOLLOW_WORDS and not all(
+                named(call.get("tool", ""), text, self._tools.registry)
+                for call in (data.get("calls") or [data])):
+            # Demande complète dont l'action n'est nommée que par la demande précédente : jamais exécutée.
+            self._event("routing", "tool:plan (action seulement déduite de la demande précédente : écartée)")
+            return self._say_text(history, text, self._router.phrase("action_unclear"), latency)
         latency["route"] = "tool:plan"
         self._event("routing", "tool:plan" + (" (suite)" if previous else ""))
         said = f"{previous.rstrip(' .!?')}. {text}" if previous else text
@@ -963,7 +976,7 @@ class Agent:
             return self._use_tools(history, said, data["calls"], latency)
         reply = self._run_call(history, said, data, latency)
         if self._last_outcome is not None and self._last_outcome.status == DONE and self._last_outcome.result.success:
-            self._last_tool_request = text
+            self._last_tool_request, self._last_tool_at = text, time.monotonic()
         return reply
 
     def _guarded(self, text: str, latency: dict) -> str | None:
@@ -1024,7 +1037,7 @@ class Agent:
                 return self._use_tools(history, text, data["calls"], latency)
         reply = self._run_call(history, text, data, latency)
         if self._last_outcome is not None and self._last_outcome.status == DONE and self._last_outcome.result.success:
-            self._last_tool_request = "" if route.tool else text
+            self._last_tool_request, self._last_tool_at = ("" if route.tool else text), time.monotonic()
         return reply
 
     def _run_call(self, history: list[Message], text: str, data: dict, latency: dict) -> str:

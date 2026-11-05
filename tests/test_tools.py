@@ -1172,3 +1172,26 @@ def test_tool_lines_of_the_agent_hide_private_text():
     _, events = run_agent(["Crée un fichier notes.txt qui contient mot secret : 4242"], llm)
     lines = [text for kind, text in events if kind == "tool"]
     assert lines and all("4242" not in text for text in lines)  # au moins une ligne vérifiée
+
+
+def test_a_full_request_never_runs_an_action_named_only_by_the_previous_request():
+    """5 novembre 2026 : « Surnomme le serveur … en … » (non reconnu), après « mets la lumière en blanc chaud », est
+    devenu « ambiance lecture » sur toutes les lumières : l'action venait de la demande précédente."""
+    first = {"type": "tool_call", "tool": "set_volume", "parameters": {"volume": 30}}
+    llm = PlannerLLM(first, {"type": "tool_call", "tool": "set_volume", "parameters": {"volume": 30}})
+    volume = FakeVolume()
+    spoken, events = run_agent(["Mets le son à 30 %.", "Surnomme le machin des copains en bidule pour faire simple"],
+                               llm, make_core(volume=volume))
+    assert any("déduite de la demande précédente" in str(e) for e in events)
+    assert volume.level == 30 and len(llm.planned) == 2
+
+
+def test_an_old_tool_request_is_no_longer_context_for_the_planner(monkeypatch):
+    import orion.agent as agent_module
+
+    monkeypatch.setattr(agent_module, "FOLLOW_WINDOW", -1.0)
+    first = {"type": "tool_call", "tool": "set_volume", "parameters": {"volume": 30}}
+    llm = PlannerLLM(first, {"type": "none"})
+    run_agent(["Mets le son à 30 %.", "Surnomme le machin des copains en bidule pour faire simple"], llm,
+              make_core(volume=FakeVolume()))
+    assert len(llm.planned) == 2 and all("Mets le son" not in m.content for m in llm.planned[-1][0])

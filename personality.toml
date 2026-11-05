@@ -432,7 +432,10 @@ needs = "discord_status"
 patterns = ["discord", "vocal", "salon vocal", "mute moi", "mute", "demute", "demute moi", "unmute", "de mute",
             "deafen", "undeafen", "mets moi en sourdine", "met moi en sourdine", "enleve moi la sourdine",
             "enleve la sourdine", "retire la sourdine", "mon micro", "le micro", "rejoins", "rejoint",
-            "reactive le son", "remets le son", "suis je en sourdine", "en sourdine"]
+            "reactive le son", "remets le son", "suis je en sourdine", "en sourdine",
+            # surnoms de serveurs (5 novembre 2026 : « surnomme le serveur X en Y » parti au LLM, ambiance lecture)
+            "surnomme le serveur", "surnom au serveur", "surnom du serveur", "surnoms de serveurs",
+            "surnoms des serveurs", "surnoms de mes serveurs", "oublie le surnom", "sur le serveur"]
 
 # Frag Factory (module V3, [fragfactory]) : clips CS2, validation, refus, versions, bilan. Testée avant la recherche
 # Web : « valide le dernier clip » (le mot « dernier ») partait en recherche et recevait une réponse inventée.

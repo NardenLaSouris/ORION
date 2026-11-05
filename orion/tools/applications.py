@@ -327,7 +327,9 @@ def _known_target(entry: Application) -> Found | None:
 def open_app_tool(apps: dict[str, Application], launcher: Callable[[list[str]], None], processes: Processes,
                   wait: float = 4.0, finder: AppFinder | None = None, blocked: Blocklist | None = None) -> Tool:
     names = {normalize(alias): key for key, a in apps.items() for alias in (key, *a.app.aliases)}
-    finder = finder or AppFinder()
+    if finder is None:
+        finder = AppFinder()
+        finder.warm()  # liste lue dès le démarrage de l'agent : « lance Fortnite » n'attend pas la lecture du PC
     blocked = blocked or Blocklist()
 
     def target(name: str) -> tuple[str, Found]:

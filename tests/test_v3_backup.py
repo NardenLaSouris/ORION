@@ -142,7 +142,7 @@ def test_the_nightly_timer_runs_as_user_without_sudo_and_keeps_backups():
     timer = (ROOT / "deploy" / "orion-v3-backup.timer").read_text(encoding="utf-8")
     script = (ROOT / "deploy" / "v3_backup_timer.sh").read_text(encoding="utf-8")
     assert "/opt/orion-v3/scripts/v3_backup.py periodic" in service and "User=" not in service
-    assert "OnCalendar=*-*-* 03:15:00" in timer and "Persistent=true" in timer
+    assert "OnCalendar=*-*-* 03:15:00 Europe/Paris" in timer and "Persistent=true" in timer
     assert "systemctl --user" in script and "sudo systemctl" not in script
     code = [line for line in script.splitlines() if not line.lstrip().startswith("#")]
     assert not any("rm " in line and "sauvegardes" in line for line in code)  # aucune sauvegarde effacée ici
@@ -156,6 +156,7 @@ def test_the_pc_copy_is_read_only_on_the_core_and_verified():
     assert script.startswith(b"\xef\xbb\xbf")  # PowerShell 5.1 : accents lus correctement
     text = script.decode("utf-8")
     assert "BatchMode=yes" in text and "Get-FileHash -Algorithm SHA256" in text and ".partiel" in text
+    assert "scp.exe -q -p -r " in text  # sous-dossier config/ recopié aussi
     for line in text.splitlines():
         if "ssh.exe" in line:
             assert '"ls -1 $Remote' in line  # seule commande lancée sur le Core : une lecture
@@ -184,3 +185,37 @@ def test_unreadable_data_leaves_no_partial_backup_and_an_unwritable_status_never
 def test_the_nightly_service_takes_the_orion_v3_group():
     service = (ROOT / "deploy" / "orion-v3-backup.service").read_text(encoding="utf-8")
     assert 'ExecStart=/usr/bin/sg orion-v3 -c "/opt/orion-v3/.venv/bin/python' in service
+
+
+def test_monthly_copies_are_kept_a_year_and_the_config_is_saved_but_never_restored(tmp_path):
+    """6 novembre 2026 (audit) : config.local.toml n'était pas sauvegardé ; pas de copie mensuelle. La configuration
+    est vérifiée comme le reste, jamais remise en place par ``restore`` ; le fichier .env n'est jamais copié."""
+    import time
+
+    data, db = make_data(tmp_path)
+    conf = tmp_path / "etc"
+    conf.mkdir()
+    (conf / "config.local.toml").write_text("[llm]\nmodel = \"x\"\n", encoding="utf-8")
+    (conf / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    out, status = tmp_path / "out", data / v3_backup.STATUS_NAME
+    config = (conf / "config.local.toml", conf / ".env", conf / "absent.toml")
+    first = v3_backup.periodic(data, out, status, config=config)
+    assert first["ok"] and first["monthly"].startswith("mensuelles/") and first["files"] == 3
+    saved = out / first["folder"]
+    assert (saved / "config" / "config.local.toml").is_file() and not (saved / "config" / ".env").exists()
+    assert v3_backup.verify(saved) == []
+    (saved / "config" / "config.local.toml").write_text("modifié", encoding="utf-8")
+    assert v3_backup.verify(saved) == ["config/config.local.toml : résumé différent"]
+    time.sleep(1.1)
+    soon = v3_backup.periodic(data, out, status, config=config, clock=lambda: time.time() + 10 * 86400)
+    assert soon["monthly"] == first["monthly"]  # moins de 28 jours : pas de nouvelle mensuelle
+    time.sleep(1.1)
+    later = v3_backup.periodic(data, out, status, config=config, monthly_keep=1,
+                               clock=lambda: time.time() + 40 * 86400)
+    assert later["monthly"] != first["monthly"] and len(list((out / "mensuelles").iterdir())) == 1
+    db.close()
+    target = tmp_path / "restauree"
+    target.mkdir()
+    v3_backup.restore(out / later["folder"], target, active=lambda: False)
+    assert (target / "orion_v3.db").is_file() and not (target / "config").exists() \
+        and not (target / "config.local.toml").exists()

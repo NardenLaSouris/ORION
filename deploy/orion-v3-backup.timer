@@ -1,9 +1,10 @@
-# Chaque nuit à 03:15 (plus ou moins 5 minutes) ; une nuit manquée (Core éteint) est rattrapée au démarrage.
+# Chaque nuit à 03:15, heure de Paris (plus ou moins 5 minutes) ; une nuit manquée (Core éteint) est rattrapée au
+# démarrage. Le fuseau est écrit ici : le mini-PC est à l'heure UTC (6 novembre 2026 : sans lui, 04:15 à Paris).
 [Unit]
 Description=ORION V3 : sauvegarde de la nuit
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
+OnCalendar=*-*-* 03:15:00 Europe/Paris
 RandomizedDelaySec=300
 Persistent=true
 

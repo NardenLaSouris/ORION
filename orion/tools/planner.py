@@ -341,6 +341,10 @@ def plan(llm, text: str, registry: ToolRegistry, previous: str = "", report: dic
     l'outil proposé puis écarté par les vérifications (une action était voulue, mais pas assez précise)."""
     if not len(registry) or not hasattr(llm, "chat_json") or quoted(text):
         return None
+    full, registry = registry, scoped_registry(registry, text, previous)
+    if not len(registry):
+        log.info("Choix d'outil : aucun outil en rapport avec la demande (%s)", text[:80])
+        return None
     messages = [Message("system", planner_prompt(registry)), Message("user", text)]
     if previous:
         messages[1:1] = [Message("user", previous),
@@ -352,8 +356,13 @@ def plan(llm, text: str, registry: ToolRegistry, previous: str = "", report: dic
     except Exception as exc:
         log.warning("Choix d'outil impossible : %s", exc)
         return None
+    offered, registry = registry, full  # vérifications sur tous les outils ; seuls les outils montrés sont permis
     if isinstance(data, dict) and data.get("type") == "tool_calls" and isinstance(data.get("calls"), list):
-        return _several(data["calls"][:MAX_CALLS], text, registry)
+        calls = [c for c in data["calls"][:MAX_CALLS] if not _hidden(c, offered, registry)]
+        return _several(calls, text, registry) if calls else None
+    if isinstance(data, dict) and data.get("type") == "tool_call" and _hidden(data, offered, registry):
+        log.info("Appel d'outil écarté : « %s » n'a pas été proposé pour cette demande", data.get("tool"))
+        return None
     if not isinstance(data, dict) or data.get("type") != "tool_call":
         return None
     grounded = _grounded(data, text, registry)
@@ -362,6 +371,13 @@ def plan(llm, text: str, registry: ToolRegistry, previous: str = "", report: dic
         if report is not None:
             report["proposed"] = str(data.get("tool", ""))
     return grounded
+
+
+def _hidden(call, offered: ToolRegistry, registry: ToolRegistry) -> bool:
+    """Outil réel mais non montré au LLM pour cette demande : écarté. Un outil inconnu, lui, suit le chemin habituel
+    (le Core le refuse et le dit)."""
+    name = call.get("tool") if isinstance(call, dict) else None
+    return offered is not registry and registry.exists(name) and not offered.exists(name)
 
 
 def _several(calls: list, text: str, registry: ToolRegistry) -> dict | None:
@@ -715,3 +731,95 @@ class ToolsCapability:
 
     def handle(self, text: str) -> None:
         return None
+
+
+# --- Outils proposés au LLM ----------------------------------------------------------------------------------------
+# Le Katana sert le modèle avec OLLAMA_NUM_PARALLEL=2 : 8 192 jetons de contexte partagés, soit 4 096 par demande. Le
+# prompt complet (141 outils, environ 7 300 jetons) était tronqué SANS AVERTISSEMENT par le début : présentation et
+# première moitié des outils perdues (mesuré le 6 novembre 2026 : un mot placé au début du prompt était oublié). Le
+# planificateur ne reçoit donc que les outils en rapport avec la demande, dans un budget qui tient dans le contexte.
+PROMPT_BUDGET = 3300  # jetons du prompt système (place laissée à la demande, à la précédente et à la réponse)
+CHARS_PER_TOKEN = 3.4  # mesuré : 3,6 caractères par jeton (tokenizer de qwen3) sur ce prompt ; marge prudente
+MAX_SCOPED = 24
+SCOPE_STOP = frozenset({
+    "les", "des", "une", "est", "pour", "dans", "sur", "avec", "par", "pas", "que", "qui", "quoi", "mon", "mes",
+    "ton", "tes", "son", "ses", "notre", "votre", "vos", "leur", "moi", "toi", "lui", "elle", "nous", "vous", "ils",
+    "elles", "cet", "cette", "ces", "ceux", "aux", "du", "au", "et", "ou", "mais", "donc", "car", "plus", "moins",
+    "tres", "tout", "tous", "toute", "toutes", "peux", "peut", "veux", "veut", "fais", "fait", "faire", "dis", "dit",
+    "dire", "est-ce", "estce", "quel", "quelle", "quels", "quelles", "comment", "combien", "orion", "jarvis",
+    "stp", "plait", "merci", "bien", "alors", "aussi", "encore", "deja", "juste", "maintenant", "nom", "parametre",
+    "parametres", "texte", "entier", "nombre", "booleen", "aucun", "demande", "outil", "seulement", "dit", "dite",
+})
+# Demandes indirectes (« on n'y voit rien », « c'est trop fort ») : mots qui désignent un domaine sans le nommer.
+SCOPE_HINTS = {
+    "voit": ("lumie", "eclai"), "noir": ("lumie",), "sombr": ("lumie",), "clair": ("lumie",), "ambia": ("lumie",),
+    "allum": ("lumie",), "etein": ("lumie",), "fort": ("volum", "son"), "entend": ("volum",), "bruit": ("volum",),
+    "music": ("spoti", "morce"), "chans": ("spoti", "morce"), "morce": ("spoti",), "vocal": ("disco",),
+    "salon": ("disco",), "micro": ("disco",), "mute": ("disco", "volum"), "clip": ("fragf",), "kill": ("fragf",),
+    "rdv": ("agend", "evene"), "rende": ("agend", "evene"), "libre": ("agend", "creno"), "semai": ("agend",),
+    "mail": ("mail", "courr"), "mails": ("mail",), "courr": ("mail",), "reveil": ("alarm",), "lance": ("appli",),
+    "ouvre": ("appli",), "jeu": ("appli",), "ferme": ("appli",), "rappe": ("rappe",), "minut": ("minut",),
+}
+
+
+def _stems(text: str) -> set[str]:
+    return {w[:5] for w in re.split(r"[^a-z0-9]+", normalize(text)) if len(w) >= 3 and w not in SCOPE_STOP}
+
+
+def _tool_weights(tool) -> dict[str, float]:
+    weights: dict[str, float] = {}
+
+    def add(text: str, weight: float) -> None:
+        for stem in _stems(text):
+            weights[stem] = max(weights.get(stem, 0.0), weight)
+
+    add(" ".join(p.description for p in tool.parameters.values() if not p.hidden), 0.5)
+    add(tool.description, 1.0)
+    add(" ".join(DOMAIN_WORDS.get(tool.name, ())), 2.0)
+    add(tool.name.replace("_", " "), 3.0)
+    return weights
+
+
+def _subset(registry: ToolRegistry, tools: list) -> ToolRegistry:
+    scoped = ToolRegistry()
+    wanted = {t.name for t in tools}
+    for tool in registry.list():  # ordre d'origine : prompt stable d'une demande à l'autre (cache d'Ollama)
+        if tool.name in wanted:
+            scoped.register(tool)
+    scoped.context = registry.context
+    return scoped
+
+
+def prompt_tokens(registry: ToolRegistry) -> int:
+    """Taille estimée du prompt du planificateur, en jetons."""
+    return int(len(planner_prompt(registry)) / CHARS_PER_TOKEN) + 1
+
+
+def scoped_registry(registry: ToolRegistry, text: str, previous: str = "") -> ToolRegistry:
+    """Outils montrés au LLM pour cette demande : tous s'ils tiennent dans le budget, sinon ceux dont les mots
+    (nom, description, mots du domaine) rejoignent la demande, puis la demande précédente. Aucun outil en
+    rapport : registre vide (le planificateur rend alors « aucune action », jamais une action au hasard). Une suite
+    courte (six mots au plus) compte pleinement la demande précédente."""
+    if prompt_tokens(registry) <= PROMPT_BUDGET:
+        return registry
+    wanted = _stems(text)
+    for stem in list(wanted):
+        wanted.update(SCOPE_HINTS.get(stem, ()))
+    before = _stems(previous) if previous else set()
+    # Suite courte (« et à 20 % ? ») : la demande précédente compte pleinement ; demande complète : à peine.
+    follow = 1.0 if len(normalize(text).split()) <= 6 else 0.25
+    ranked = []
+    for index, tool in enumerate(registry.list()):
+        weights = _tool_weights(tool)
+        score = sum(weights.get(s, 0.0) for s in wanted) + follow * sum(weights.get(s, 0.0) for s in before)
+        if score >= 1.0:
+            ranked.append((-score, index, tool))
+    chosen: list = []
+    for _, _, tool in sorted(ranked, key=lambda r: (r[0], r[1]))[:MAX_SCOPED]:
+        if prompt_tokens(_subset(registry, chosen + [tool])) > PROMPT_BUDGET:
+            break
+        chosen.append(tool)
+    scoped = _subset(registry, chosen)
+    log.info("Choix d'outil : %d outils sur %d proposés au LLM (environ %d jetons)", len(scoped), len(registry),
+             prompt_tokens(scoped) if chosen else 0)
+    return scoped

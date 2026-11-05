@@ -63,10 +63,11 @@ if (-not $latest) { Write-Log "Aucune sauvegarde hebdomadaire sur le Core pour l
 $final = Join-Path $Dest $latest
 if (Test-Path (Join-Path $final 'manifest.json')) { Write-Log "$latest déjà copiée ; rien à faire."; exit 0 }
 
+# -r : sous-dossier config/ des sauvegardes (configuration du Core, depuis le 6 novembre 2026).
 $partial = "$final.partiel"
 if (Test-Path $partial) { Remove-Item -Recurse -Force $partial }
 New-Item -ItemType Directory -Force $partial | Out-Null
-& scp.exe -q -p @ssh "${Core}:$Remote/$latest/*" "$partial\"
+& scp.exe -q -p -r @ssh "${Core}:$Remote/$latest/*" "$partial\"
 if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $partial; Write-Log "Copie de $latest interrompue ; écartée."; exit 1 }
 
 $problems = @()

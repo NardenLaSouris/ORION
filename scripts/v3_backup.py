@@ -16,7 +16,11 @@
   vérifiée dans ``quotidiennes/`` (14 gardées), recopiée dans ``hebdomadaires/`` si la dernière y a 7 jours ou plus
   (8 gardées), puis un état ``backup_status.json`` dans le dossier de données, que SENTINEL lit (alerte écrite si la
   dernière sauvegarde manque, a échoué ou date de plus de 26 heures). Les sauvegardes d'avant déploiement restent à
-  part, à la racine de ``--out`` : aucune rotation ne touche l'autre.
+  part, à la racine de ``--out`` : aucune rotation ne touche l'autre. Recopiée aussi dans ``mensuelles/`` si la
+  dernière y a 28 jours ou plus (12 gardées : un an).
+- **Configuration** (``--config``, par défaut ``/opt/orion-v3/config.local.toml``) : copiée dans ``config/`` et
+  vérifiée comme le reste, mais jamais remise en place par ``restore`` (elle se remet à la main, après lecture) ; le
+  fichier ``.env`` des secrets n'en fait jamais partie.
 La base personnelle (F4) est sauvegardée telle quelle, chiffrée ; aucune clé n'est jamais copiée.
 """
 
@@ -43,8 +47,12 @@ SKIP = ("-wal", "-shm", ".tmp")
 SECRET_FILES = frozenset({"spotify_token.json"})
 SERVICE = "orion-v3"
 STATUS_NAME = "backup_status.json"  # état de la sauvegarde périodique : jamais sauvegardé lui-même
-DAILY, WEEKLY = "quotidiennes", "hebdomadaires"
+DAILY, WEEKLY, MONTHLY = "quotidiennes", "hebdomadaires", "mensuelles"
 WEEK_SECONDS = 7 * 86400 - 3600  # une heure de marge : la minuterie peut glisser de quelques minutes
+MONTH_SECONDS = 28 * 86400 - 3600
+CONFIG_DIR = "config"  # configuration sauvegardée à part : jamais restaurée automatiquement
+DEFAULT_CONFIG = (Path("/opt/orion-v3/config.local.toml"),)
+CONFIG_SECRETS = frozenset({".env"})  # secrets : jamais sauvegardés, même nommés dans --config
 
 
 def _guard(path: Path) -> Path:
@@ -68,7 +76,7 @@ def _integrity(path: Path) -> str:
         return db.execute("PRAGMA integrity_check").fetchone()[0]
 
 
-def backup(data: Path, out: Path, keep: int) -> Path:
+def backup(data: Path, out: Path, keep: int, config: tuple[Path, ...] | list[Path] = ()) -> Path:
     data, out = _guard(data), _guard(out)
     if not data.is_dir():
         raise SystemExit(f"Dossier de données absent : {data}")
@@ -76,7 +84,7 @@ def backup(data: Path, out: Path, keep: int) -> Path:
     target.mkdir(parents=True, exist_ok=False)
     target.chmod(0o700)
     try:
-        _copy_all(data, target)
+        _copy_all(data, target, config)
     except BaseException:
         shutil.rmtree(target, ignore_errors=True)  # sauvegarde incomplète, jamais laissée parmi les bonnes
         raise
@@ -86,8 +94,20 @@ def backup(data: Path, out: Path, keep: int) -> Path:
     return target
 
 
-def _copy_all(data: Path, target: Path) -> None:
+def _copy_all(data: Path, target: Path, config: tuple[Path, ...] | list[Path] = ()) -> None:
     manifest = {"format": 1, "source": str(data), "created_at": time.time(), "files": {}, "excluded": []}
+    for item in config:
+        item = Path(item)
+        if item.name in CONFIG_SECRETS:
+            manifest["excluded"].append(f"{CONFIG_DIR}/{item.name}")
+            continue
+        if not item.is_file():
+            continue  # absente sur cette machine : rien à garder
+        (target / CONFIG_DIR).mkdir(exist_ok=True)
+        copy = target / CONFIG_DIR / item.name
+        shutil.copy2(item, copy)
+        copy.chmod(0o600)
+        manifest["files"][f"{CONFIG_DIR}/{item.name}"] = {"sha256": _sha256(copy), "bytes": copy.stat().st_size}
     for item in sorted(data.iterdir()):
         if not item.is_file() or item.name.endswith(SKIP) or item.name == STATUS_NAME:
             continue
@@ -148,6 +168,8 @@ def restore(folder: Path, data: Path, *, active=_service_active) -> Path:
     aside = data / time.strftime("avant-restauration-%Y-%m-%dT%H%M%S")
     aside.mkdir()
     for name in manifest["files"]:
+        if name.startswith(CONFIG_DIR + "/"):
+            continue  # configuration : remise à la main seulement (voir le docstring)
         for suffix in ("", "-wal", "-shm"):
             current = data / f"{name}{suffix}"
             if current.exists():
@@ -172,7 +194,7 @@ def _backups(folder: Path) -> list[Path]:
 
 
 def _size(folder: Path) -> int:
-    return sum(p.stat().st_size for p in folder.iterdir() if p.is_file())
+    return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file())
 
 
 def write_status(path: Path, status: dict) -> None:
@@ -183,30 +205,41 @@ def write_status(path: Path, status: dict) -> None:
     os.replace(temp, path)
 
 
+def _promote(target: Path, folder: Path, every: float, kept: int, clock) -> list[Path]:
+    """Recopie ``target`` dans ``folder`` si la dernière copie y a ``every`` secondes ou plus ; garde ``kept`` copies."""
+    copies = _backups(folder)
+    if not copies or clock() - _created(copies[-1]) >= every:
+        shutil.copytree(target, folder / target.name, copy_function=shutil.copy2)
+        copies = _backups(folder)
+        for stale in copies[:-kept] if kept > 0 else []:
+            shutil.rmtree(stale)
+        copies = _backups(folder)
+    return copies
+
+
 def periodic(data: Path, out: Path, status_path: Path | None, keep: int = 14, weekly_keep: int = 8,
-             clock=time.time) -> dict:
+             clock=time.time, monthly_keep: int = 12, config: tuple[Path, ...] | list[Path] = ()) -> dict:
     """Sauvegarde de la nuit : quotidienne vérifiée, hebdomadaire si due, état pour SENTINEL. Ne lève jamais :
     un échec est écrit dans l'état (SENTINEL prévient), et la sortie vaut 1."""
     status = {"format": 1, "at": clock(), "ok": False, "folder": "", "problems": [], "bytes": 0, "files": 0,
-              "weekly": "", "weekly_at": 0.0}
+              "weekly": "", "weekly_at": 0.0, "monthly": "", "monthly_at": 0.0}
     try:
         out = _guard(out)
-        for folder in (out / DAILY, out / WEEKLY):
+        for folder in (out / DAILY, out / WEEKLY, out / MONTHLY):
             folder.mkdir(parents=True, exist_ok=True)
             folder.chmod(0o700)
-        target = backup(data, out / DAILY, keep)
+        target = backup(data, out / DAILY, keep, config)
         problems = verify(target)
         status.update(folder=f"{DAILY}/{target.name}", problems=problems, ok=not problems, bytes=_size(target),
                       files=len(json.loads((target / "manifest.json").read_text(encoding="utf-8"))["files"]))
-        weeklies = _backups(out / WEEKLY)
-        if not problems and (not weeklies or clock() - _created(weeklies[-1]) >= WEEK_SECONDS):
-            shutil.copytree(target, out / WEEKLY / target.name, copy_function=shutil.copy2)
-            weeklies = _backups(out / WEEKLY)
-            for stale in weeklies[:-weekly_keep] if weekly_keep > 0 else []:
-                shutil.rmtree(stale)
-            weeklies = _backups(out / WEEKLY)
+        weeklies = _promote(target, out / WEEKLY, WEEK_SECONDS, weekly_keep, clock) if not problems \
+            else _backups(out / WEEKLY)
+        monthlies = _promote(target, out / MONTHLY, MONTH_SECONDS, monthly_keep, clock) if not problems \
+            else _backups(out / MONTHLY)
         if weeklies:
             status.update(weekly=f"{WEEKLY}/{weeklies[-1].name}", weekly_at=_created(weeklies[-1]))
+        if monthlies:
+            status.update(monthly=f"{MONTHLY}/{monthlies[-1].name}", monthly_at=_created(monthlies[-1]))
     except SystemExit as exc:  # backup() et _guard() refusent par SystemExit, avec un message en clair
         status["problems"] = [str(exc.code)]
     except (OSError, sqlite3.Error) as exc:
@@ -227,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--data", type=Path, default=DEFAULT_DATA)
     b.add_argument("--out", type=Path, default=DEFAULT_OUT)
     b.add_argument("--keep", type=int, default=14)
+    b.add_argument("--config", type=Path, action="append", default=None)
     v = sub.add_parser("verify")
     v.add_argument("folder", type=Path)
     r = sub.add_parser("restore")
@@ -237,15 +271,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     p.add_argument("--keep", type=int, default=14)
     p.add_argument("--weekly-keep", type=int, default=8)
+    p.add_argument("--monthly-keep", type=int, default=12)
+    p.add_argument("--config", type=Path, action="append", default=None)
     p.add_argument("--status", type=Path, default=DEFAULT_DATA / STATUS_NAME)
     args = parser.parse_args(argv)
     if args.command == "periodic":
-        status = periodic(args.data, args.out, args.status, args.keep, args.weekly_keep)
+        config = DEFAULT_CONFIG if args.config is None else tuple(args.config)
+        status = periodic(args.data, args.out, args.status, args.keep, args.weekly_keep,
+                          monthly_keep=args.monthly_keep, config=config)
         print(f"Sauvegarde {status['folder'] or '—'} : " + ("vérifiée" if status["ok"] else "; ".join(status["problems"]))
-              + (f" ; hebdomadaire : {status['weekly']}" if status["weekly"] else ""))
+              + (f" ; hebdomadaire : {status['weekly']}" if status["weekly"] else "")
+              + (f" ; mensuelle : {status['monthly']}" if status["monthly"] else ""))
         return 0 if status["ok"] else 1
     if args.command == "backup":
-        target = backup(args.data, args.out, args.keep)
+        target = backup(args.data, args.out, args.keep, DEFAULT_CONFIG if args.config is None else args.config)
         problems = verify(target)
         print(f"Sauvegarde {target} : " + ("vérifiée" if not problems else "; ".join(problems)))
         return 1 if problems else 0

@@ -6,10 +6,14 @@ ailleurs ni journalisé. Relance après un arrêt inattendu (attente croissante 
     arrêt propre : créer le fichier C:\\Users\\theju\\.orion\\fragfactory\\stop (le superviseur arrête Frag Factory et
     s'arrête lui-même ; le fichier est retiré au lancement suivant).
 Un seul superviseur à la fois ; si le port 8742 est déjà pris (autre instance), il ne lance rien.
+Le PC principal sert aux jeux (6 novembre 2026 : l'OCR des analyses occupait 8 cœurs sur 16 en continu) : Frag Factory
+tourne en priorité « inactive » (il ne prend que le processeur que rien d'autre ne demande) et sur 6 processeurs logiques
+sur 16 ; FFmpeg et l'OCR, lancés par lui, héritent des deux réglages.
 """
 
 from __future__ import annotations
 
+import ctypes
 import msvcrt
 import os
 import socket
@@ -24,6 +28,8 @@ HOME = Path.home() / ".orion" / "fragfactory"
 STOP = HOME / "stop"
 PORT = 8742
 NO_WINDOW = 0x08000000
+IDLE_PRIORITY = 0x00000040
+CPU_MASK = 0xFC00  # processeurs logiques 10 à 15 : les jeux gardent les 10 premiers
 
 
 def log(text: str) -> None:
@@ -54,6 +60,17 @@ def stop_tree(proc: subprocess.Popen) -> None:
     subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, creationflags=NO_WINDOW)
 
 
+def limit_cpu() -> None:
+    """Le superviseur se limite lui-même : Windows transmet ces processeurs à tout ce qu'il lance ensuite."""
+    try:
+        kernel = ctypes.windll.kernel32
+        kernel.GetCurrentProcess.restype = ctypes.c_void_p
+        if not kernel.SetProcessAffinityMask(ctypes.c_void_p(kernel.GetCurrentProcess()), ctypes.c_size_t(CPU_MASK)):
+            log("limite de processeurs non appliquée (moins de 16 processeurs ?)")
+    except (AttributeError, OSError) as exc:
+        log(f"limite de processeurs non appliquée : {exc}")
+
+
 def main() -> None:
     HOME.mkdir(parents=True, exist_ok=True)
     lock = open(HOME / "supervise.lock", "w")
@@ -65,6 +82,7 @@ def main() -> None:
     if listening():
         log(f"port {PORT} déjà occupé : rien n'est lancé (une autre instance tourne)")
         return
+    limit_cpu()
     delay = 5.0
     while not STOP.exists():
         secret = token()
@@ -76,7 +94,8 @@ def main() -> None:
         started = time.monotonic()
         with open(HOME / "serve.log", "ab") as err:
             proc = subprocess.Popen([str(PYTHON), "-m", "fragfactory", "serve"], cwd=FF, env=env,
-                                    stdout=subprocess.DEVNULL, stderr=err, creationflags=NO_WINDOW)
+                                    stdout=subprocess.DEVNULL, stderr=err,
+                                    creationflags=NO_WINDOW | IDLE_PRIORITY)
         log(f"Frag Factory lancé (pid {proc.pid})")
         while proc.poll() is None:
             if STOP.exists():
